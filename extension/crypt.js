@@ -3,12 +3,13 @@
  */
 var PGPCrypter = function()
 {
+    this.openpgp = new openpgp();
+        
     this.encrypt = function(message, successCallback, errorCallback)
     {
-        var openpgp = new openpgp();
         var key = this.PublicKey;
         var publicKey = openpgp.key.readArmored(key);
-        openpgp.encryptMessage(publicKey.keys, message).then(function(pgpMessage)
+        this.openpgp.encryptMessage(publicKey.keys, message).then(function(pgpMessage)
         {
             successCallback(pgpMessage);
         }).catch(function(error)
@@ -19,13 +20,12 @@ var PGPCrypter = function()
 
     this.decrypt = function(cryptedMessage, successCallback, errorCallback)
     {
-        var openpgp = new openpgp();
         var key = this.config.privateKey;
         var privateKey = openpgp.key.readArmored(key).keys[0];
         privateKey.decrypt(this.config.passphrase);
         var pgpMessage = cryptedMessage;
         pgpMessage = openpgp.message.readArmored(pgpMessage);
-        openpgp.decryptMessage(privateKey, pgpMessage).then(function(plaintext) {
+        this.openpgp.decryptMessage(privateKey, pgpMessage).then(function(plaintext) {
             successCallback(plaintext);
         }).catch(function(error) {
             errorCallback(error);
