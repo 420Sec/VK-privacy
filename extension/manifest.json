@@ -2,7 +2,7 @@
     "manifest_version": 2,
     "content_scripts" : [
         {
-            "js":[ "main.js", "crypt.js", "jquery-2.1.1.min.js" ],
+            "js":["jquery-2.1.1.min.js", "openpgp.min.js", "crypt.js", "main.js"],
             "matches":[ "http://vk.com/im", "http://vk.com/im*" ],
             "run_at":"document_end"
         }
