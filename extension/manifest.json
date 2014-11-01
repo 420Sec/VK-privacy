@@ -1,0 +1,14 @@
+{
+    "manifest_version": 2,
+    "content_scripts" : [
+        {
+            "js":[ "main.js", "crypt.js", "jquery-2.1.1.min.js" ],
+            "matches":[ "http://vk.com/im", "http://vk.com/im*" ],
+            "run_at":"document_end"
+        }
+    ],
+    "description" : "VK-privacy extention",
+    "name" : "VK-privacy",
+    "permissions" : [ "http://*/*", "unlimitedStorage"],
+    "version" : "0.0.1"
+}
