@@ -33,10 +33,12 @@ var PGPCrypter = function()
     };
 
 
-    this.config = function(config)
+    this.SetConfig = function(config)
     {
-        this.config.publicKey = config.publicKey;
-        this.config.privateKey = config.privateKey;
-        this.config.passphrase = config.passphrase;
+        this.config = config;
+
+        //config.publicKey
+        //config.privateKey
+        //config.passphrase
     }; //config - какой-то json/js объект с необходимыми настройками
 }
