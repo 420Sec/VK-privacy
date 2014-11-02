@@ -40,3 +40,25 @@ var PGPCrypter = function()
         this.config.passphrase = config.passphrase;
     }; //config - какой-то json/js объект с необходимыми настройками
 }
+var OTSCrypter = function(){
+    this.get_url = function(s){
+        url = "";
+        $.ajax({
+            url: "https://onetimesecret.com/api/v1/share",
+            async: false,
+            beforeSend: function (xhr) {
+                xhr.setRequestHeader ("Authorization", "Basic " + btoa("alphakun88@gmail.com" + ":" + "073bc6f06219ca0d82bc63ee4218a6ff7747bb9c"));
+            },
+            dataType: 'json',
+            contentType: 'application/json',
+            processData: false,
+            success: function (data) {
+                alert(JSON.stringify(data));
+            },
+            error: function(){
+                alert("Cannot get data");
+            },
+            data: '{"secret": "' + s + '"}'
+        });
+    }
+}
