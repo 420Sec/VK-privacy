@@ -11,14 +11,7 @@ var CryptoGuy = function()
         {
             if (this.pgpCrypter.isPGPMessage(message))
             {
-                if (this.pgpCrypter.isOpenKey((message))) // request for new session
-                {
-                    return this.PackMyKey(message);
-                }
-                else // all other stuff
-                {
-                    this.pgpCrypter.ParsePGPMessage(message);
-                }
+                this.pgpCrypter.ParsePGPMessage(message);
             }
         }
     };

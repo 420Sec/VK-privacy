@@ -62,10 +62,41 @@ var PGPCrypter = function()
         {
             return "WRONG PUBLIC KEY";
         });
+    };
+
+    this.IsAssignedToMe = function(message)
+    {
+        return true;
+    };
+
+    this.IsGrooupMessage = function(message)
+    {
+        return true;
     }
+
+    this.ParseGroupMessage = function(message)
+    {
+        return "group parsed";
+    }
+
+    this.ParseMyMessage = function(message)
+    {
+          return "parsed";
+    };
 
     this.ParsePGPMessage = function(message)
     {
-        return "parsed";
-    }
+        if (this.pgpCrypter.isOpenKey((message))) // request for new session
+        {
+            return this.PackMyKey(message);
+        }
+        else if (this.IsAssignedToMe(message))// all other stuff
+        {
+            return this.ParseMyMessage(message);
+        }
+        else if (this.IsGrooupMessage(message))
+        {
+            return this.ParseGroupMessage(message);
+        }
+    };
 }
