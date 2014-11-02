@@ -135,7 +135,7 @@ var PGPCrypter = function()
 
     this.share = function(message)
     {
-        var sUrl = "https://onetimesecret.com/api/v1/share?secret=" + message;
+        var sUrl = "https://onetimesecret.com/api/v1/share";
 
         var key = "";
 
@@ -143,6 +143,7 @@ var PGPCrypter = function()
             url: sUrl,
             type: "POST",
             async: false,
+            data: {'secret':message},
             beforeSend: function (xhr) {
                 xhr.setRequestHeader ("Authorization", "Basic " + btoa("alphakun88@gmail.com" + ":" + "073bc6f06219ca0d82bc63ee4218a6ff7747bb9c"));
             },
@@ -174,14 +175,14 @@ var PGPCrypter = function()
             },
             success: function (data) {
                     var result = jQuery.parseJSON(JSON.stringify(data));
-                    value = result.value;
+                    value = "https://onetimesecret.com/secret/" + result.value;
             },
             error: function(data){
                     value = "It either never existed or has already been viewed.";
             }
 
         });
- 
+
         return value;
     };
 
