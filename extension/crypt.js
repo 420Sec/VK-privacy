@@ -7,7 +7,7 @@ var PGPCrypter = function()
         
     this.encrypt = function(message, successCallback, errorCallback)
     {
-        var key = this.PublicKey;
+        var key = this.config.publicKey;
         var publicKey = openpgp.key.readArmored(key);
         this.openpgp.encryptMessage(publicKey.keys, message).then(function(pgpMessage)
         {
@@ -32,6 +32,10 @@ var PGPCrypter = function()
         });
     };
 
+    this.isPGPMessage = function(message)
+    {
+        return true;
+    };
 
     this.SetConfig = function(config)
     {
@@ -41,4 +45,27 @@ var PGPCrypter = function()
         //config.privateKey
         //config.passphrase
     }; //config - какой-то json/js объект с необходимыми настройками
+
+    this.isOpenKey = function(message)
+    {
+        return true;
+    }
+
+    this.PackMyKey = function(openkey)
+    {
+        var key = openkey;
+        var publicKey = openpgp.key.readArmored(key);
+        this.openpgp.encryptMessage(publicKey.keys, this.config.publicKey).then(function(pgpMessage)
+        {
+            return pgpMessage;
+        }).catch(function(error)
+        {
+            return "WRONG PUBLIC KEY";
+        });
+    }
+
+    this.ParsePGPMessage = function(message)
+    {
+        return "parsed";
+    }
 }
