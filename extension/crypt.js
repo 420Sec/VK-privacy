@@ -4,7 +4,7 @@
 var PGPCrypter = function()
 {
     this.openpgp = new openpgp();
-        
+    this.Session = false;
     this.encrypt = function(message, successCallback, errorCallback)
     {
         var key = this.config.publicKey;
@@ -37,19 +37,10 @@ var PGPCrypter = function()
         return true;
     };
 
-    this.SetConfig = function(config)
-    {
-        this.config = config;
-
-        //config.publicKey
-        //config.privateKey
-        //config.passphrase
-    }; //config - какой-то json/js объект с необходимыми настройками
-
     this.isOpenKey = function(message)
     {
         return false;
-    }
+    };
 
     this.PackMyKey = function(openkey)
     {
@@ -64,29 +55,44 @@ var PGPCrypter = function()
         });
     };
 
+    /**
+     * @return {bool}
+     */
     this.IsAssignedToMe = function(message)
     {
         return true;
     };
 
+    /**
+     * @return {bool}
+     */
     this.IsGrooupMessage = function(message)
     {
         return true;
-    }
+    };
 
+    /**
+     * @return {string}
+     */
     this.ParseGroupMessage = function(message)
     {
         return "group parsed";
-    }
-
-    this.ParseMyMessage = function(message)
-    {
-          return "parsed";
     };
 
+    /**
+     * @return {string}
+     */
+    this.ParseMyMessage = function(message)
+    {
+        return String("cryptedmessage");
+    };
+
+    /**
+     * @return {string}
+     */
     this.ParsePGPMessage = function(message)
     {
-        if (this.pgpCrypter.isOpenKey((message))) // request for new session
+        if (this.pgpCrypter.isOpenKey(message)) // request for new session
         {
             return this.PackMyKey(message);
         }
@@ -100,11 +106,14 @@ var PGPCrypter = function()
         }
     };
 
+    /**
+     * @return {string}
+     */
     this.EncryptPGP = function(message)
     {
         if ( this.Session == false )
         {
-            return "cryptedmessage";
+            return String("cryptedmessage");
         }
-    }
+    };
 }

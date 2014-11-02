@@ -8,7 +8,7 @@ var CryptoGuy = function()
     this.OpenTag = "[420Sec]";
     this.CloseTag = "[/420Sec]";
 
-    this.Decrypt = function ( message )
+    this.Decrypt = function ( message)
     {
         if (this.isCryptoMessage(message))
         {
@@ -19,6 +19,9 @@ var CryptoGuy = function()
         }
     };
 
+    /**
+     * @return {string}
+     */
     this.Encrypt = function(message)
     {
         var pgpMessage = this.OpenTag +

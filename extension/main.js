@@ -11,4 +11,7 @@ $(document).ready(function(){
             $(".im_editable").text("ots");
         }
     });
+    console.log("[420] script loaded");
+    var cryptoguy = new CryptoGuy();
+    console.log(cryptoguy.Encrypt("test"));
 });
