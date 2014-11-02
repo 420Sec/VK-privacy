@@ -23,13 +23,11 @@ function save_options() {
 // stored in chrome.storage.
 function restore_options() {
     chrome.storage.sync.get({
-        publicKey: '',
-        privateKey: '',
-        passphrase: '',
+        publicKey: 'none',
+        privateKey: 'none',
+        passphrase: 'none',
         type: 'no'
     }, function(items) {
-        document.getElementById('color').value = items.favoriteColor;
-        document.getElementById('like').checked = items.likesColor;
         document.getElementById('extcrypt-publicKey').value = items.publicKey;
         document.getElementById('extcrypt-privateKey').value = items.privateKey;
         document.getElementById('extcrypt-passphrase').value = items.passphrase;
