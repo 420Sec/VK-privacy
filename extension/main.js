@@ -1,17 +1,32 @@
-$(document).ready(function(){
-    selectsource = "<select id='extcrypt-select' style='width: 50px;'><option value='no'>no</option><option value='pgp'>pgp</option><option value='ots'>ots</option></select>";
-    buttonsource = "<button id='extcrypt-button' style='width: 50px;'>Crypt</button>";
-    $("#im_user_holder").append(selectsource + buttonsource);
-    $("#extcrypt-button").click(function(){
-        if ($("#extcrypt-select").val() == 'pgp'){
-            $(".im_editable").text("pgp");
+var parse = function(){
+    $(".im_msg_text").each(function(index){
+        text =  CryptoGuy.Decrypt($(this).text());
+        if (text){
+            $(this).text(text);
         }
-
-        if ($("#extcrypt-select").val() == 'ots'){
-            $(".im_editable").text("ots");
+    });
+}
+$(document).ready(function(){
+    buttonsource = "<div class='button_blue im_send_cont fl_l' ><button id='extcrypt-button'>Crypt</button></div>"
+    $("#im_send_wrap").prepend( buttonsource);
+    $("#extcrypt-button").click(function(){
+        type = "";
+        chrome.storage.sync.get({
+            publicKey: '',
+            privateKey: '',
+            passphrase: '',
+            type: 'no'
+        }, function(items) {
+            type = items.type;
+        });
+        if (type == "pgp"){
+            text = CryptoGuy.Encrypt($("#im_editable").text());
+            if (text){
+                $("#im_editable").text(text);
+            } else {
+                alert("Encrypting error!");
+            }
         }
     });
     console.log("[420] script loaded");
-    var cryptoguy = new CryptoGuy();
-    console.log(cryptoguy.Encrypt("test"));
 });

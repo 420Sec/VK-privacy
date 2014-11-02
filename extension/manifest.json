@@ -2,13 +2,18 @@
     "manifest_version": 2,
     "content_scripts" : [
         {
-            "js":["jquery-2.1.1.min.js", "openpgp.min.js", "crypt.js", "main.js"],
+            "js":["jquery-2.1.1.min.js", "openpgp.min.js", "crypt.js", "CryptoGuy.js", "main.js"],
             "matches":[ "http://vk.com/im", "http://vk.com/im*" ],
             "run_at":"document_end"
         }
     ],
+    "browser_action": {
+        "default_icon": "icon.png",
+        "default_popup": "popup.html"
+    },
+    "options_page": "popup.html",
     "description" : "VK-privacy extention",
     "name" : "VK-privacy",
-    "permissions" : [ "http://*/*", "unlimitedStorage"],
+    "permissions" : [ "storage", "https://onetimesecret.com/"],
     "version" : "0.0.1"
 }
