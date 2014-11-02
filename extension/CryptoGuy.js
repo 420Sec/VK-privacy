@@ -5,7 +5,10 @@ var CryptoGuy = function()
 {
     this.pgpCrypter = new PGPCrypter();
 
-    this.Parse = function ( message )
+    this.OpenTag = "[420Sec]";
+    this.CloseTag = "[/420Sec]";
+
+    this.Decrypt = function ( message )
     {
         if (this.isCryptoMessage(message))
         {
@@ -16,10 +19,16 @@ var CryptoGuy = function()
         }
     };
 
+    this.Encrypt = function(message)
+    {
+        var pgpMessage = this.OpenTag +
+            this.pgpCrypter.EncryptPGP(message) + this.CloseTag;
+        return pgpMessage;
+    };
+
     this.isCryptoMessage = function (message)
     {
         return true;
     };
 
-
-}
+};

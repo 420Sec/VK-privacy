@@ -48,7 +48,7 @@ var PGPCrypter = function()
 
     this.isOpenKey = function(message)
     {
-        return true;
+        return false;
     }
 
     this.PackMyKey = function(openkey)
@@ -99,4 +99,12 @@ var PGPCrypter = function()
             return this.ParseGroupMessage(message);
         }
     };
+
+    this.EncryptPGP = function(message)
+    {
+        if ( this.Session == false )
+        {
+            return "cryptedmessage";
+        }
+    }
 }
