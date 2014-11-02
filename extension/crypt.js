@@ -4,10 +4,10 @@
 var PGPCrypter = function()
 {
     this.openpgp = new openpgp();
-        
+
     this.encrypt = function(message, successCallback, errorCallback)
     {
-        var key = this.PublicKey;
+        var key = this.config.publicKey;
         var publicKey = openpgp.key.readArmored(key);
         this.openpgp.encryptMessage(publicKey.keys, message).then(function(pgpMessage)
         {
@@ -32,33 +32,40 @@ var PGPCrypter = function()
         });
     };
 
-
-    this.config = function(config)
+    this.isPGPMessage = function(message)
     {
-        this.config.publicKey = config.publicKey;
-        this.config.privateKey = config.privateKey;
-        this.config.passphrase = config.passphrase;
+        return true;
+    };
+
+    this.SetConfig = function(config)
+    {
+        this.config = config;
+
+        //config.publicKey
+        //config.privateKey
+        //config.passphrase
     }; //config - какой-то json/js объект с необходимыми настройками
-}
-var OTSCrypter = function(){
-    this.get_url = function(s){
-        url = "";
-        $.ajax({
-            url: "https://onetimesecret.com/api/v1/share",
-            async: false,
-            beforeSend: function (xhr) {
-                xhr.setRequestHeader ("Authorization", "Basic " + btoa("alphakun88@gmail.com" + ":" + "073bc6f06219ca0d82bc63ee4218a6ff7747bb9c"));
-            },
-            dataType: 'json',
-            contentType: 'application/json',
-            processData: false,
-            success: function (data) {
-                alert(JSON.stringify(data));
-            },
-            error: function(){
-                alert("Cannot get data");
-            },
-            data: '{"secret": "' + s + '"}'
+
+    this.isOpenKey = function(message)
+    {
+        return true;
+    }
+
+    this.PackMyKey = function(openkey)
+    {
+        var key = openkey;
+        var publicKey = openpgp.key.readArmored(key);
+        this.openpgp.encryptMessage(publicKey.keys, this.config.publicKey).then(function(pgpMessage)
+        {
+            return pgpMessage;
+        }).catch(function(error)
+        {
+            return "WRONG PUBLIC KEY";
         });
+    }
+
+    this.ParsePGPMessage = function(message)
+    {
+        return "parsed";
     }
 }
