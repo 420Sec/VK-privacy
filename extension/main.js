@@ -1,32 +1,13 @@
-var parse = function(){
-    $(".im_msg_text").each(function(index){
-        text =  CryptoGuy.Decrypt($(this).text());
-        if (text){
-            $(this).text(text);
-        }
-    });
-}
+var cryptoMode = false;
+console.log("START");
+require("pgpvkchat.js");
 $(document).ready(function(){
-    buttonsource = "<div class='button_blue im_send_cont fl_l' ><button id='extcrypt-button'>Crypt</button></div>"
-    $("#im_send_wrap").prepend( buttonsource);
+    console.log("document ready");
+    var buttonsource = "<div class='button_blue im_send_cont fl_l' style='width: 50px; margin-top: 6px;'><button id='extcrypt-button' style='width: 50px;'>PRIV</button></div>";
+    $("#im_user_holder").append(buttonsource);
+    console.log("button added");
     $("#extcrypt-button").click(function(){
-        type = "";
-        chrome.storage.sync.get({
-            publicKey: '',
-            privateKey: '',
-            passphrase: '',
-            type: 'no'
-        }, function(items) {
-            type = items.type;
-        });
-        if (type == "pgp"){
-            text = CryptoGuy.Encrypt($("#im_editable").text());
-            if (text){
-                $("#im_editable").text(text);
-            } else {
-                alert("Encrypting error!");
-            }
-        }
+        pgpChat.init();
     });
-    console.log("[420] script loaded");
+    console.log("cryptoMode = " + cryptoMode);
 });

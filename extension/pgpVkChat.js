@@ -1,0 +1,3119 @@
+var pgpChat = {
+    maxHeight: 300,
+    tabs: {},
+    counters: {},
+    showFriends: function() {
+        if (curPgpFastChat.clistBox.visible) {
+            if (curPgpFastChat.clistBox.options.fixed) {
+                pgpFastChat.clistHide();
+            } else {
+                curPgpFastChat.clistBox.show();
+            }
+        } else {
+            pgpFastChat.clistShow();
+            if (pgpChat.cont.tt && pgpChat.cont.tt.destroy) {
+                pgpChat.cont.tt.destroy();
+            }
+        }
+    },
+    showTT: function() {
+        if (!hasClass(pgpChat.wrap, 'chat_active') && !hasClass(pgpChat.wrap, 'chat_expand')) {
+            showTooltip(pgpChat.cont, {text: getLang('head_fr_online_tip')+' ('+(browser.mac ? 'Cmd':'Ctrl')+'+?)', shift: [-2,4,0], showdt: 0, black: 1});
+        }
+    },
+    init: function() {
+        pgpChat.wrap = ce('div', {id: 'chat_onl_wrap', className: 'chat_onl_wrap', innerHTML: '<div class="chats_sp chat_cont_sh_top"></div><div class="chat_cont_scrolling"><div class="chat_onl_height"></div></div><div class="chats_sp chat_cont_sh_bottom"></div><a class="chat_tab_wrap" id="chat_tab_wrap" onclick="pgpChat.showFriends()" onmouseover="pgpChat.showTT();"><div class="chat_onl_cont"><div class="chat_onl" id="chat_onl"></div><div class="chats_sp chat_onl_icon"></div></div></a>'});
+        utilsNode.appendChild(pgpChat.wrap);
+        pgpChat.scrollNode = geByClass1('chat_cont_scrolling', pgpChat.wrap);
+        pgpChat.itemsCont = pgpChat.scrollNode.firstChild;
+        pgpChat.onl = ge('chat_onl');
+        pgpChat.cont = pgpChat.onl.parentNode.parentNode;
+
+        hide(pgpChat.wrap);
+        pgpChat.inited = true;
+        stManager._addCss('.layers_shown .chat_onl_wrap {margin-right: '+sbWidth()+'px;}');
+    }
+};
+
+
+pgpFastChat = {
+    init: function (options) {
+        extend(curPgpFastChat, {
+            tabs: {},
+            needPeers: {},
+            gotPeers: {},
+            needMedia: {},
+            gotMedia: {},
+            myTypingEvents: {},
+            typingEvents: {},
+            inited: true,
+            options: options,
+            posSeq: 0,
+            error_timeout: 1
+        });
+        delete curPgpFastChat.standby;
+        delete curPgpFastChat.standbyTO;
+        Notifier.addRecvClbk('fastchat', 0, pgpFastChat.lcRecv, true);
+        pgpFastChat.lcSend('needSettings', {version: options.version, lang_id: langConfig.id});
+        clearTimeout(curPgpFastChat.getSettingsTO);
+        curPgpFastChat.getSettingsTO = setTimeout(pgpFastChat.getSettings, 300);
+    },
+    getSettings: function () {
+        var friends = ls.get('fcFriends' + vk.id);
+        ajax.post('al_im.php', {
+            act: 'a_get_fast_chat',
+            friends: friends && friends.version
+        }, {
+            onDone: function (data) {
+                if (data.friends == -1) {
+                    data.friends_version = friends.version;
+                    data.friends = friends.list;
+                } else {
+                    ls.set('fcFriends' + vk.id, {version: data.friends_version, list: data.friends});
+                }
+                pgpFastChat.gotSettings(data);
+                pgpFastChat.sendSettings();
+            },
+            onFail: function () {
+                return true;
+            }
+        });
+    },
+    gotSettings: function(data) {
+        if (data['emoji_stickers']) {
+            window.emojiStickers = data['emoji_stickers'];
+        }
+        if (window.Emoji) {
+            Emoji.updateTabs();
+        }
+        clearTimeout(curPgpFastChat.getSettingsTO);
+        window.lang = extend(window.lang || {}, data.lang);
+        extend(curPgpFastChat, data, {lang_id: langConfig.id});
+        if (curNotifier.is_server) {
+            if (!data.im_queue) {
+                clearTimeout(curPgpFastChat.lp_error_to);
+                curPgpFastChat.lp_error_to = setTimeout(pgpFastChat.updateQueueKeys.bind(pgpFastChat), (curNotifier.error_timeout || 1) * 1000);
+            } else if (!curPgpFastChat.lpInited) {
+                pgpFastChat.initLp();
+            }
+        }
+        curPgpFastChat.friendsCnt = 0;
+        for (var i in (curPgpFastChat.friends || {})) {
+            curPgpFastChat.friendsCnt++;
+        }
+        setTimeout(pgpFastChat.clistCache.pbind(false), 10);
+        pgpFastChat.initUI();
+    },
+    sendSettings: function () {
+        clearTimeout(curPgpFastChat.sendSettingsTO);
+        var settings = {}, k = ['friends', 'friends_version', 'onlines', 'tpl', 'lang', 'me', 'version', 'im_queue', 'cl_queue'], i;
+        for (i in k) {
+            if (k[i] != 'cl_queue' && curPgpFastChat[k[i]] === undefined) {
+                return;
+            }
+            settings[k[i]] = curPgpFastChat[k[i]];
+        }
+        clearTimeout(curPgpFastChat.sendSettingsTO);
+        curPgpFastChat.sendSettingsTO = setTimeout(function () {
+            pgpFastChat.lcSend('settings', {settings: settings})
+        }, curNotifier.is_server ? 0 : irand(50, 100));
+    },
+    becameServer: function () {
+        if (curPgpFastChat.lpInited || !curPgpFastChat.version) {
+            return;
+        }
+        delete curNotifier.addQueues['fastchat' + vk.id];
+        delete curNotifier.addQueues['contacts' + vk.id];
+        if (!curPgpFastChat.im_queue) {
+            clearTimeout(curPgpFastChat.lp_error_to);
+            curPgpFastChat.lp_error_to = setTimeout(pgpFastChat.updateQueueKeys.bind(pgpFastChat), (curNotifier.error_timeout || 1) * 1000);
+        } else if (!curPgpFastChat.lpInited) {
+            pgpFastChat.initLp();
+        }
+    },
+    destroy: function () {
+        if (!curPgpFastChat.inited) {
+            return false;
+        }
+        var topLink;
+        pgpFastChat.stopLp();
+        each(curPgpFastChat.tabs || {}, function (peer, tab) {
+            tab.box.destroy();
+        });
+        curPgpFastChat.clistBox && curPgpFastChat.clistBox.destroy();
+        each (curPgpFastChat.el || {}, function () {
+            cleanElems(this);
+        });
+        clearInterval(curPgpFastChat.updateFriendsInt);
+        clearInterval(curPgpFastChat.updateTypingsInt);
+        clearTimeout(curPgpFastChat.correspondentsTO);
+        clearTimeout(curPgpFastChat.lp_error_to);
+        curPgpFastChat = {inited: false};
+        return true;
+    },
+    standby: function (version) {
+        pgpFastChat.destroy();
+        curPgpFastChat.standby = true;
+        var to = 1, cb = function () {
+            if (!curNotifier.is_server) {
+                clearTimeout(curPgpFastChat.standbyTO);
+                curPgpFastChat.standbyTO = setTimeout(cb, to * 1000);
+                return;
+            }
+            ajax.post('notifier.php?act=a_get_reload', {version: version}, {
+                onDone: function (navVersion, config) {
+                    pgpFastChat.lcSend('gotConfig', {navVersion: navVersion, config: config});
+                    pgpFastChat.gotConfig(navVersion, config);
+                },
+                onFail: function () {
+                    to *= 2;
+                    clearTimeout(curPgpFastChat.standbyTO);
+                    curPgpFastChat.standbyTO = setTimeout(cb, to * 1000);
+                    return true;
+                }
+            });
+        };
+        cb();
+    },
+    gotConfig: function (navVersion, config) {
+        clearTimeout(curPgpFastChat.standbyTO);
+        if (!curPgpFastChat.standby) {
+            return;
+        }
+        setTimeout(function () {
+            if (navVersion > stVersions['nav']) {
+                debugLog('appending al loader');
+                headNode.appendChild(ce('script', {
+                    type: 'text/javascript',
+                    src: '/js/loader_nav' + navVersion + '_' + vk.lang + '.js'
+                }));
+            }
+            setTimeout(function() {
+                if (navVersion <= stVersions['nav']) {
+                    stManager.add(['notifier.js', 'notifier.css', 'emoji.js'], function () {
+                        pgpFastChat.init(config);
+                    })
+                    return;
+                }
+                setTimeout(arguments.callee, 100);
+            }, 0);
+        }, curNotifier.is_server ? 0 : irand(1000, 2000));
+    },
+    updateVersion: function (version) {
+        pgpFastChat.lcSend('standby', {version: version});
+        pgpFastChat.standby(version);
+    },
+
+    // Local connection: communication between tabs in one browser instanse
+    lcSend: function (act, data) {
+        Notifier.lcSend('fastchat', extend({act: act, __id: curPgpFastChat.me && curPgpFastChat.me.id || vk.id}, data));
+    },
+    lcRecv: function (data) {
+        if (isEmpty(data)) return;
+        var act = data.act;
+        if (data.__id != (curPgpFastChat.me && curPgpFastChat.me.id || vk.id)) {
+            return;
+        }
+        delete data.act;
+        delete data.__id;
+        pgpFastChat.lcFeed(act, data);
+    },
+    lcFeed: function (act, data) {
+        switch (act) {
+            case 'needSettings':
+                if (curPgpFastChat.version < data.version) {
+                    // May be update version here
+                } else if (data.lang_id == curPgpFastChat.lang_id) {
+                    pgpFastChat.sendSettings();
+                }
+                break;
+
+            case 'settings':
+                if (!curPgpFastChat.version && curPgpFastChat.options && data.settings.version == curPgpFastChat.options.version) {
+                    pgpFastChat.gotSettings(data.settings);
+                }
+                clearTimeout(curPgpFastChat.sendSettingsTO);
+                break;
+
+            case 'standby':
+                if (!curPgpFastChat.version) break;
+                pgpFastChat.standby(data.version);
+                break;
+
+            case 'gotConfig':
+                pgpFastChat.gotConfig(data.navVersion, data.config);
+                break;
+
+            case 'clFeed':
+                if (!curPgpFastChat.version) break;
+                pgpFastChat.clFeed(data.events);
+                break;
+
+            case 'clistOnlines':
+                if (!curPgpFastChat.version) break;
+                pgpFastChat.clistGotOnlines(data);
+                break;
+
+            case 'imFeeds':
+                if (!curPgpFastChat.version) break;
+                pgpFastChat.imFeeds(data);
+                break;
+
+            case 'needPeer':
+                if (!curPgpFastChat.version) break;
+                var peer = data.id, tab = curPgpFastChat.tabs[peer], i, peerData = false, mem;
+                if (tab !== undefined) {
+                    peerData = {
+                        name: tab.name,
+                        photo: tab.photo,
+                        fname: tab.fname,
+                        hash: tab.hash,
+                        sex: tab.sex,
+                        data: tab.data,
+                        online: tab.online
+                    };
+                    for (i in tab.msgs) {
+                        peerData.history = [tab.log.innerHTML, tab.msgs];
+                        break;
+                    }
+                } else if (mem = curPgpFastChat.friends[peer + '_']) {
+                    peerData = {name: mem[0], photo: mem[1], fname: mem[2], hash: mem[3], data: mem[4], online: curPgpFastChat.onlines[peer]};
+                }
+                if (peerData === false) {
+                    break;
+                }
+                curPgpFastChat.gotPeers[peer] = setTimeout(function () {
+                    var response = {};
+                    response[peer] = peerData;
+                    pgpFastChat.lcSend('gotPeers', response);
+                }, curNotifier.is_server ? 0 : irand(50, 100));
+
+                break;
+
+            case 'fetchingPeers':
+                if (!curPgpFastChat.version) break;
+                each (data, function (peer, flags) {
+                    var needPeer = curPgpFastChat.needPeers[peer];
+                    if (needPeer && (flags & needPeer[0]) == needPeer[0]) {
+                        clearTimeout(needPeer[2]);
+                    }
+                });
+                break;
+
+            case 'gotPeers':
+                if (!curPgpFastChat.version) break;
+                pgpFastChat.gotPeers(data);
+                break;
+
+            case 'stateChange':
+                if (!curPgpFastChat.version) break;
+                pgpFastChat.onStateChanged(data);
+                break;
+
+            case 'queueSet':
+                extend(curPgpFastChat, data);
+                break;
+
+            case 'queueClean':
+                if (!curNotifier.is_server) {
+                    delete curPgpFastChat.im_queue;
+                    delete curPgpFastChat.cl_queue;
+                }
+                break;
+
+            case 'needMedia':
+                var msgId = data.msgId, msgMedia = curPgpFastChat.gotMedia[msgId];
+                if (msgMedia === undefined || msgMedia === 0) {
+                    break;
+                }
+                curPgpFastChat.gotMedia[msgId][3] = setTimeout(function () {
+                    pgpFastChat.lcSend('gotMedia', {msgId: msgId, peer: msgMedia[0], text: msgMedia[1], msgOpts: msgMedia[2]});
+                }, curNotifier.is_server ? 0 : irand(50, 100));
+                break;
+
+            case 'fetchingMedia':
+                // if (!curPgpFastChat.version) break;
+                var msgId = data.msgId, msgNeed = curPgpFastChat.needMedia[msgId];
+                if (msgNeed === undefined || curPgpFastChat.gotMedia[msgId] === 0) {
+                    break;
+                }
+                clearTimeout(msgNeed[1]);
+                msgNeed[1] = setTimeout(pgpFastChat.loadMsgMedia.pbind(msgNeed[0], msgId), 1000);
+                break;
+
+            case 'gotMedia':
+                var msgId = data.msgId, msgMedia = curPgpFastChat.gotMedia[msgId];
+                if (isArray(msgMedia)) {
+                    clearTimeout(msgMedia[3]);
+                }
+                pgpFastChat.gotMsgMedia(data.peer, msgId, data.text, data.msgOpts);
+                break;
+        }
+    },
+
+    // Long poll
+    initLp: function () {
+        curPgpFastChat.lpInited = true;
+        pgpFastChat.checkLp();
+        curPgpFastChat.checkLpInt = setInterval(pgpFastChat.checkLp, 20000);
+    },
+    stopLp: function () {
+        curPgpFastChat.lpInited = false;
+        clearInterval(curPgpFastChat.checkLpInt);
+        delete curPgpFastChat.im_queue;
+        delete curPgpFastChat.cl_queue;
+    },
+    checkLp: function () {
+        if (!curNotifier.is_server || !curPgpFastChat.im_queue/* || !curPgpFastChat.cl_queue*/) {
+            return;
+        }
+        Notifier.addKey({
+            queue: curPgpFastChat.im_queue.id,
+            key: curPgpFastChat.im_queue.key,
+            ts: curPgpFastChat.im_queue.ts
+        }, pgpFastChat.imChecked, true);
+
+        if (curPgpFastChat.cl_queue) {
+            Notifier.addKey({
+                queue: curPgpFastChat.cl_queue.id,
+                key: curPgpFastChat.cl_queue.key,
+                ts: curPgpFastChat.cl_queue.ts
+            }, pgpFastChat.clChecked, true);
+        }
+        pgpFastChat.lcSend('queueSet', {
+            im_queue: curPgpFastChat.im_queue,
+            cl_queue: curPgpFastChat.cl_queue
+        });
+    },
+    updateQueueKeys: function () {
+        if (curPgpFastChat.updatingQueues) {
+            return;
+        }
+        curPgpFastChat.updatingQueues = 1;
+        pgpFastChat.lcSend('queueClean');
+        pgpFastChat.stopLp();
+        ajax.post('al_im.php', {act: 'a_get_fc_queue'}, {
+            onDone: function (data) {
+                if (data.version > curPgpFastChat.version) {
+                    pgpFastChat.updateVersion(data.version);
+                    return;
+                }
+                delete curPgpFastChat.updatingQueues;
+                extend(curPgpFastChat, data);
+                pgpFastChat.lcSend('queueSet', data);
+                if (curNotifier.is_server) {
+                    pgpFastChat.initLp();
+                    pgpFastChat.clistUpdate();
+                }
+            },
+            onFail: function () {
+                delete curPgpFastChat.updatingQueues;
+                pgpFastChat.destroy();
+                return true;
+            }
+        });
+    },
+
+    // Checked function (recv long-poll response)
+    clChecked: function (queue, response) {
+        if (!curPgpFastChat.inited || !curPgpFastChat.ready || !curPgpFastChat.cl_queue) return;
+        if (response.failed) {
+            clearTimeout(curPgpFastChat.lp_error_to);
+            curPgpFastChat.lp_error_to = setTimeout(pgpFastChat.updateQueueKeys.bind(pgpFastChat), (curNotifier.error_timeout || 1) * 1000);
+            return;
+        }
+        if (response.ts) {
+            if (response.key) {
+                curPgpFastChat.cl_queue.key = response.key;
+            }
+            curPgpFastChat.cl_queue.ts = response.ts;
+            pgpFastChat.lcSend('queueSet', {cl_queue: curPgpFastChat.cl_queue});
+        }
+        if (!isArray(response.events) || !response.events.length) {
+            return;
+        }
+        pgpFastChat.clFeed(response.events);
+        pgpFastChat.lcSend('clFeed', {events: response.events});
+    },
+    clFeed: function (events) {
+        if (!curPgpFastChat.inited || !curPgpFastChat.ready || !curPgpFastChat.tabs) return;
+        var clistUpdated = false, failed = false;
+        each (events, function () {
+            var ev = this.split('<!>'), evVer = ev[0], evType = ev[1], peer = ev[2], onltype = ev[3] ? ev[3] : 1, tab = curPgpFastChat.tabs[peer], wasOnline = curPgpFastChat.onlines[peer];
+            if (evVer != curPgpFastChat.version) {
+                pgpFastChat.updateVersion(evVer);
+                failed = true;
+                return false;
+            }
+            if (!curPgpFastChat.friends[peer + '_'] && !tab) {
+                return;
+            }
+
+            switch (evType) {
+                case 'online':
+                    if (wasOnline == onltype) break;
+                    curPgpFastChat.onlines[peer] = onltype;
+                    pgpFastChat.tabNotify(peer, 'online', onltype);
+                    clistUpdated = true;
+                    break;
+
+                case 'offline':
+                    if (!wasOnline) break;
+                    delete curPgpFastChat.onlines[peer];
+                    if (re('fc_contact' + peer) && curPgpFastChat.clistBox.visible) {
+                        pgpFastChat.clistShowMore();
+                    }
+                    pgpFastChat.tabNotify(peer, 'offline');
+                    break;
+            }
+        });
+        if (failed) {
+            return;
+        }
+        if (clistUpdated &&
+            curPgpFastChat.clistBox.visible &&
+            curNotifier.idle_manager && !curNotifier.idle_manager.is_idle &&
+            (curPgpFastChat.el.clist.scrollTop < 100 || curRBox.active != curPgpFastChat.clistBox.id)) {
+            pgpFastChat.clistRender(); // Title is also updated here
+        } else {
+            pgpFastChat.clistUpdateTitle();
+        }
+    },
+    imChecked: function (queue, response) {
+        if (!curPgpFastChat.inited || !curPgpFastChat.ready || !curPgpFastChat.im_queue) return;
+        if (response.failed) {
+            clearTimeout(curPgpFastChat.lp_error_to);
+            curPgpFastChat.lp_error_to = setTimeout(pgpFastChat.updateQueueKeys.bind(pgpFastChat), (curNotifier.error_timeout || 1) * 1000);
+            return;
+        }
+        if (response.ts && curPgpFastChat.im_queue) {
+            if (response.key) {
+                curPgpFastChat.im_queue.key = response.key;
+            }
+            curPgpFastChat.im_queue.ts = response.ts;
+            pgpFastChat.lcSend('queueSet', {im_queue: curPgpFastChat.im_queue});
+        }
+        if (!isArray(response.events) || !response.events.length) {
+            return;
+        }
+        var feeds = {}, failed = false;
+        each (response.events, function () {
+            var ev = this.split('<!>'),
+                evVer = ev[0],
+                evType = ev[1],
+                peer = ev[2],
+                flags = 0,
+                tab = curPgpFastChat.tabs[peer];
+
+            if (evVer != curPgpFastChat.version) {
+                pgpFastChat.updateVersion(evVer);
+                failed = true;
+                return false;
+            }
+
+            switch (evType) {
+                case 'read':
+                    break;
+
+                case 'typing':
+                    flags = 1;
+                    break;
+
+                case 'new':
+                    flags = (ev[4] & 2) ? 0 : 2;
+                    break;
+
+                default: return;
+            }
+
+            if (!feeds[peer]) {
+                feeds[peer] = [0];
+            }
+            feeds[peer][0] |= flags;
+            feeds[peer].push(ev);
+        });
+        if (failed || isEmpty(feeds)) {
+            return;
+        }
+        pgpFastChat.lcSend('imFeeds', feeds);
+        pgpFastChat.imFeeds(feeds);
+    },
+    imFeeds: function (feeds) {
+        if (!curPgpFastChat.inited || !curPgpFastChat.ready) return;
+        each (feeds, function (peer, events) {
+            var flags = events.shift();
+            pgpFastChat.imFeed(peer, events);
+        });
+    },
+
+    blinkEl: function(el, num, cb) {
+        if (num > 10) {
+            cb();
+            return false;
+        }
+        if (num % 2 == 0) {
+            animate(el, {opacity: 0}, 400, function() {
+                pgpFastChat.blinkEl(el, num + 1, cb);
+            });
+        } else {
+            animate(el, {opacity: 1}, 400, function() {
+                setTimeout(function() {
+                    pgpFastChat.blinkEl(el, num + 1, cb);
+                }, 400);
+            });
+        }
+
+    },
+
+    blinkTyping: function(peer) {
+        var el = ge('chat_tab_icon_'+peer);
+        if (!el) {
+            return;
+        }
+        var tIcon = geByClass1('chat_tab_typing_wrap', el);
+        fadeIn(tIcon, 150, function() {
+            pgpFastChat.blinkEl(tIcon.firstChild, 0, function() {
+                fadeOut(tIcon, 150);
+            });
+        });
+    },
+
+    imFeed: function (peer, events) {
+        var tab = curPgpFastChat.tabs[peer],
+            ts = vkNow();
+
+        each (events, function (k, ev) {
+            switch(ev[1]) {
+                case 'new':
+                    if ((ev[4] & 3) === 1) { // unreed
+                        pgpFastChat.changePeerCounter(peer, 1);
+                    }
+                    break;
+                case 'read':
+                    var cnt = 1;
+                    each(ev[3].split(','), function (k, msgId) {
+                        cnt += 1;
+                    });
+                    pgpFastChat.changePeerCounter(peer, -cnt);
+                    break;
+                case 'typing':
+                    if (Chat.tabs[peer]) {
+                        pgpFastChat.blinkTyping(peer);
+                    }
+                    break;
+            }
+        });
+
+        if (!tab) return false;
+        each (events, function (k, ev) {
+            switch (ev[1]) {
+                case 'new':
+                    stManager.add(['im.js'], function() {
+                        each (tab.sentmsgs, function (k, msgId) {
+                            var row = ge('fc_msg' + msgId), parent = row && row.parentNode;
+                            if (re(row) && parent && !geByClass('fc_msg', parent).length) {
+                                re(parent.parentNode);
+                            }
+                        });
+                        if (!ge('fc_msg' + ev[3])) {
+                            pgpFastChat.addMsg(pgpFastChat.prepareMsgData(ev.slice(2)));
+                            tab.msgs[ev[3]] = [ev[4] & 2 ? 1 : 0, ev[4] & 1];
+                            if ((ev[4] & 3) === 1) tab.unread++;
+                            pgpFastChat.scroll(peer);
+                        }
+                        pgpFastChat.blinkTab(peer);
+                    });
+                    break;
+
+                case 'read':
+                    each(ev[3].split(','), function (k, msgId) {
+                        var row = ge('fc_msg' + msgId), parent = row && row.parentNode;
+                        if (!row) return;
+                        if (tab.msgs[msgId] && tab.msgs[msgId][1]) {
+                            tab.msgs[msgId][1] = 0;
+                            if (!tab.msgs[msgId][0]) {
+                                tab.unread--;
+                            }
+                        }
+                        removeClass(row, 'fc_msg_unread');
+                        if (hasClass(parent.parentNode, 'fc_msgs_unread')) {
+                            each (parent.childNodes, function () {
+                                if (!hasClass(this, 'fc_msg_unread')) {
+                                    removeClass(parent.parentNode, 'fc_msgs_unread');
+                                    return false;
+                                }
+                            });
+                        }
+                    });
+                    break;
+
+                case 'typing':
+                    if (peer > 2e9) {
+                        if (!curPgpFastChat.typingEvents[peer]) {
+                            curPgpFastChat.typingEvents[peer] = {};
+                        }
+                        curPgpFastChat.typingEvents[peer][ev[3]] = ts;
+                    } else {
+                        curPgpFastChat.typingEvents[peer] = ts;
+                    }
+                    pgpFastChat.updateTyping(peer);
+                    break;
+            }
+        });
+        if (tab.unread > 0) {
+            tab.unread = 0;
+            each (tab.msgs, function () {
+                if (!this[0] && this[1]) tab.unread++;
+            });
+        }
+        if (tab.auto && !tab.unread) {
+            tab.box._close(true);
+            delete curPgpFastChat.tabs[peer];
+        }
+        pgpFastChat.updateUnreadTab(peer);
+    },
+    tabNotify: function(peer, evType, evData) {
+        var tab = curPgpFastChat.tabs[peer];
+        if (peer > 0 && peer < 2e9 && isFunction(cur.onPeerStatusChanged)) {
+            cur.onPeerStatusChanged(peer, evType, evData);
+        }
+        if (peer <= 0 || !tab || !tab.box || tab.box.minimized) return;
+        var addClassTo = geByClass1('fc_tab', tab.wrap, 'div'), mob = (evData > 0 && evData < 6), cls = mob ? 'fc_tab_mobile' : 'fc_tab_online';
+        if (evType == 'online') {
+            addClassTo.className = addClassTo.className.replace(mob ? 'fc_tab_online' : 'fc_tab_mobile', cls);
+            if (hasClass(addClassTo, cls)) return;
+        }
+
+        clearTimeout(tab.hideNotifyTO);
+        switch (evType) {
+            case 'online':
+                text = langSex(tab.sex, lang.mail_im_user_became_online);
+                pgpFastChat.blinkTab(peer);
+                addClass(addClassTo, cls);
+                break;
+
+            case 'offline':
+                text = langSex(tab.sex, lang.mail_im_user_became_offline);
+                pgpFastChat.blinkTab(peer);
+                removeClass(addClassTo, 'fc_tab_online');
+                removeClass(addClassTo, 'fc_tab_mobile');
+                break;
+
+            case 'unavail':
+                text = langSex(tab.sex, lang.mail_im_user_unavail);
+                break;
+        }
+        text = text.replace('{user}', tab.fname);
+        val(tab.notify, '<div class="fc_tab_notify fc_tab_notify_' + evType + '">' + text + '</div>');
+        var notify = tab.notify.firstChild;
+        setStyle(notify, {width: tab.logWrap.clientWidth - 8/*, zIndex: 400*/});
+        clearTimeout(tab.hideNotifyTO);
+        tab.hideNotifyTO = setTimeout(function () {
+            fadeOut(notify, 200, function () {
+                val(tab.notify, '');
+            });
+        }, 5000);
+    },
+
+    hideChatCtrl: function() {
+        removeClass(Chat.wrap, 'chat_active');
+        removeEvent(document, 'mousedown', pgpFastChat.onDocClick);
+    },
+
+    showChatCtrl: function() {
+        addClass(Chat.wrap, 'chat_active');
+        setTimeout(function() {
+            addEvent(document, 'mousedown', pgpFastChat.onDocClick);
+        }, 0);
+    },
+
+    initUI: function () {
+        var el = curPgpFastChat.el = {},
+            wndInner = getWndInner();
+        re('rb_box_fc_clist');
+        el.clistWrap = se(curPgpFastChat.tpl.clist);
+        el.clist = geByClass1('fc_contacts', el.clistWrap, 'div');
+        el.clistTitle = geByClass1('fc_tab_title', el.clistWrap, 'div');
+        el.clistOnline = geByClass1('fc_clist_online', el.clistWrap, 'div');
+
+        var state = curPgpFastChat.options.state || false,
+            clistMin = !curPgpFastChat.friendsCnt || (!(state && state.clist.min !== undefined) ? wndInner[1] < 1200 || curPgpFastChat.friendsCnt < 5 : state.clist.min);
+        curPgpFastChat.clistW = 252;
+        //curPgpFastChat.clistH = Math.max(290, Math.min(2000, wndInner[0] * 0.5));
+        curPgpFastChat.clistH = 316;
+        var opts = {
+            id: 'fc_clist',
+            movable: geByClass1('fc_tab_head', el.clistWrap),
+            hider: geByClass1('fc_tab_close_wrap', el.clistWrap, 'a'),
+            startHeight: curPgpFastChat.clistH,
+            startWidth: curPgpFastChat.clistW,
+            resizeableH: el.clist,
+            resize: false,
+            minH: 150,
+            fixed: clistMin,
+            onHide: function (hideOpts) {
+                val('fc_clist_filter', curPgpFastChat.q = '');
+                //pgpFastChat.clistRender();
+                addClass(curPgpFastChat.clistBox.wrap, 'fc_fixed');
+                curPgpFastChat.clistBox.fixed = true;
+                pgpFastChat.stateChange({op: 'clist_toggled', val: 0});
+                setStyle(curPgpFastChat.clistBox.wrap, {top: 'auto', bottom: 0, right: 68, left: 'auto'});
+                show(el.topLink);
+                pgpFastChat.hideChatCtrl();
+            },
+            onShow: function() {
+                pgpFastChat.showChatCtrl();
+            },
+            onDragEnd: function (y, x) {
+                pgpFastChat.stateChange({op: 'clist_moved', y: y, x: x});
+            },
+            onResize: function (h, w) {
+                curPgpFastChat.clistBoxScroll && curPgpFastChat.clistBoxScroll.update(false, true);
+            }
+        };
+        if (state && !clistMin) {
+            if (state.clist.x !== false) {
+                if (state.clist.x == -1) {
+                    opts.startRight = 0;
+                } else {
+                    opts.startLeft = wndInner[1] * state.clist.x;
+                }
+            }
+            if (state.clist.y !== false) {
+                if (state.clist.y == -1) {
+                    opts.startBottom = 0;
+                } else {
+                    opts.startTop = wndInner[0] * state.clist.y;
+                }
+            }
+        }
+        if (clistMin) {
+            opts.noshow = true;
+        }
+        if (opts.startTop === undefined && opts.startBottom === undefined) {
+            opts.startTop = wndInner[0] < 800 ? 0 : wndInner[0] * 0.10;
+        }
+        if (opts.startLeft === undefined && opts.startRight === undefined) {
+            opts.startRight = 0;
+        }
+        curPgpFastChat.clistBox = new RBox(el.clistWrap, opts);
+        if (!opts.noshow && (opts.startLeft !== undefined || opts.startTop !== undefined)) {
+            curPgpFastChat.clistBox._wnd_resize(wndInner[0], wndInner[1], true);
+        }
+
+        // Friends list
+        curPgpFastChat.clistBoxScroll = new Scrollbar(el.clist, {
+            prefix: 'fc_',
+            more: pgpFastChat.clistShowMore,
+            nomargin: true,
+            global: true,
+            nokeys: true,
+            right: vk.rtl ? 'auto' : 1,
+            left: !vk.rtl ? 'auto' : 1
+        });
+        curPgpFastChat.updateFriendsInt = setInterval(pgpFastChat.clistUpdate, 3 * 60000);
+        curPgpFastChat.updateTypingsInt = setInterval(pgpFastChat.updateTypings, 5000);
+
+        var filter = ge('fc_clist_filter');
+        placeholderSetup(filter, {global: true, back: 1});
+        curPgpFastChat.q = '';
+        addEvent(filter, 'keyup ' + (browser.opera ? 'keypress' : 'keydown'), function (e) {
+            if (e.keyCode == KEY.ESC) {
+                pgpFastChat.clistHide();
+                return cancelEvent(e);
+            }
+            var control = pgpFastChat.clistFilterKey(e);
+            if (control !== undefined) {
+                return control;
+            }
+            curPgpFastChat.q = trim(val(this));
+            pgpFastChat.clistRender();
+        });
+
+        if (el.clistOnline) {
+            var lShift, probe;
+            bodyNode.appendChild(probe = ce('nobr', {className: 'fl_l', innerHTML: getLang('mail_im_clist_onlines')}, {visibility: 'hidden', position: 'absolute'}));
+            lShift = (probe.offsetWidth || 179) - 7;
+            re(probe);
+            addEvent(el.clistOnline, 'mouseover', function (e) {
+                showTooltip(this, {text: getLang('mail_im_clist_onlines'), forcetoup: 1, shift: [12, 4, 3], className: 'tt_fc_onlines', init: function () {
+                    if (browser.msie) el.clistOnline.tt.isFixed = false;
+                }, black: 1});
+            });
+            addEvent(el.clistOnline, 'click', function (e) {
+                (e.originalEvent || e).cancelBubble = true;
+                pgpFastChat.clistToggleOnlines();
+                pgpFastChat.clistRender();
+            });
+            if (state && state.clist && state.clist.onlines) {
+                pgpFastChat.clistToggleOnlines(true);
+            }
+        }
+
+        if (!clistMin) {
+            pgpFastChat.clistRender();
+        } else {
+            pgpFastChat.clistUpdateTitle();
+        }
+        curPgpFastChat.ready = true;
+
+        // Add tabs
+        if (state && state.tabs) {
+            each (state.tabs, function (peer, peerOpts) {
+                peer = intval(peer);
+                var opts = {nofocus: 1};
+                if (this.min) {
+                    opts.minimized = true;
+                }
+                if (this.h) {
+                    opts.startHeight = this.h * wndInner[0];
+                }
+                if (this.w) {
+                    opts.startWidth = this.w * wndInner[1];
+                }
+                if (this.x !== undefined && this.x <= 1) {
+                    if (this.x < 0) {
+                        opts.startRight = 0;
+                    } else {
+                        opts.startLeft = wndInner[1] * this.x;
+                    }
+                }
+                if (this.y !== undefined && this.y <= 1) {
+                    if (this.y < 0) {
+                        opts.startBottom = 0;
+                    } else {
+                        opts.startTop = wndInner[0] * this.y;
+                    }
+                }
+                if (peerOpts.fx) {
+                    opts.fixedLoad = true;
+                    pgpFastChat.prepareTabIcon(peer, opts, true);
+                } else {
+                    opts.noAnim = true;
+                    pgpFastChat.addPeer(peer, false, false, opts);
+                }
+            });
+        }
+
+        addEvent(Chat.itemsCont, 'mousemove mouseover', pgpFastChat.itemsTT)
+        addEvent(Chat.itemsCont, 'mouseout', pgpFastChat.itemsOut)
+    },
+
+    itemsOffset: 12,
+
+    itemsTT: function(ev) {
+        var el = ev.target;
+        var item = false;
+        while(el && el != Chat.itemsCont) {
+            if (hasClass(el, 'chat_tab_wrap')) {
+                item = el;
+                break;
+            }
+            el = el.parentNode;
+        }
+        if (!item) {
+            clearTimeout(Chat.ttOutTimeout);
+            Chat.ttOutTimeout = false;
+            return false;
+        }
+        var peer = item.id.split('_')[3];
+        var tab = Chat.tabs[peer];
+        if (!tab) {
+            return false;
+        }
+        if (curPgpFastChat.activeBox && curPgpFastChat.activeBox.visible && curPgpFastChat.activeBox.options.peer == peer) {
+            pgpFastChat.itemsOut();
+            return false;
+        }
+
+        clearTimeout(Chat.ttOutTimeout);
+        Chat.ttOutTimeout = false;
+
+        var newTop = getXY(el)[1] - getXY(Chat.itemsCont)[1];
+        var tt = Chat.userNameTT;
+        if (!tt) {
+            Chat.userNameTT = ce('div', {className: 'chat_tab_info_wrap', innerHTML: '<div class="chat_tab_info_tt"><div class="chat_tab_info_p"></div><div id="chat_tab_info_text"></div></div>'}, {top: newTop - Chat.scrollNode.scrollTop + pgpFastChat.itemsOffset, right: 70, opacity: 0});
+            Chat.wrap.insertBefore(Chat.userNameTT, Chat.wrap.firstChild);
+        }
+        if (!Chat.ttPeer) {
+            show(Chat.userNameTT);
+            animate(Chat.userNameTT, {opacity: 1, right: 60}, 100);
+        }
+        val('chat_tab_info_text', tab.name);
+        if (Chat.ttPeer != peer || Chat.ttTop != newTop) {
+            Chat.ttPeer = peer;
+            Chat.ttTop = newTop;
+            setStyle(Chat.userNameTT, {top: newTop - Chat.scrollNode.scrollTop + pgpFastChat.itemsOffset});
+        }
+    },
+
+    itemsOut: function() {
+        if (Chat.ttOutTimeout) {
+            return false;
+        }
+        Chat.ttOutTimeout = setTimeout(function() {
+            Chat.ttOutTimeout = false;
+            if (!Chat.ttPeer) {
+                return false;
+            }
+            animate(Chat.userNameTT, {opacity: 0, right: 70}, 100, function() {
+                hide(Chat.userNameTT);
+            });
+            Chat.ttPeer = false;
+        }, 0);
+    },
+
+    stateChange: function(data) {
+        ajax.post('al_im.php', extend({act: 'a_state_fc', hash: curPgpFastChat.options.state_hash || ''}, data), {
+            onFail: function () {return true;}
+        });
+        pgpFastChat.lcSend('stateChange', data);
+    },
+    onStateChanged: function (data) {
+        var tab = data.peer ? curPgpFastChat.tabs[data.peer] : false,
+            box = data.peer ? (tab && tab.box) : curPgpFastChat.clistBox,
+            wndInner = getWndInner();
+        switch (data.op) {
+            case 'added':
+                if (tab) {
+                    delete tab.auto
+                    break;
+                }
+                if (data.fixed) {
+                    pgpFastChat.prepareTabIcon(data.peer, {fixedLoad: true})
+                } else {
+                    pgpFastChat.addPeer(data.peer);
+                }
+                break;
+            case 'unfixed':
+                var unfixOpts = {
+                    startHeight: intval(wndInner[0] * data.h),
+                    startWidth: intval(wndInner[1] * data.w),
+                }
+                if (data.y == -1) {
+                    unfixOpts.startBottom = 0;
+                } else {
+                    unfixOpts.startTop = intval(wndInner[0] * data.y);
+                }
+                if (data.x == -1) {
+                    unfixOpts.startRight = 0;
+                } else {
+                    unfixOpts.startLeft = intval(wndInner[1] * data.x);
+                }
+                pgpFastChat.addPeer(data.peer, false, false, unfixOpts);
+                break;
+
+            case 'closed':
+                if (Chat.tabs[data.peer]) {
+                    pgpFastChat.closeTabIcon(data.peer);
+                }
+                if (!tab || !box) break;
+                box.close();
+                break;
+
+            case 'hidden':
+                if (!tab || !box) break;
+                box.close();
+                break;
+
+            case 'minimized':
+                if (!tab || !box) break;
+                if (data.val) {
+                    box.unminimize();
+                } else {
+                    box.minimize();
+                }
+                break;
+
+            case 'moved':
+                setStyle(box.wrap, {
+                    bottom: data.y == -1 ? 0 : 'auto',
+                    top: data.y != -1 ? intval(wndInner[0]  * data.y) : 'auto',
+                    right: data.x == -1 ? 0 : 'auto',
+                    left: data.x != -1 ? intval(wndInner[1] * data.x) : 'auto'
+                });
+                box.toBottom = data.y == -1;
+                box.toRight = data.x == -1;
+                break;
+
+            case 'resized':
+                setStyle(box.wrap, {
+                    bottom: data.y == -1 ? 0 : 'auto',
+                    top: data.y != -1 ? intval(wndInner[0]  * data.y) : 'auto',
+                    right: data.x == -1 ? 0 : 'auto',
+                    left: data.x != -1 ? intval(wndInner[1] * data.x) : 'auto'
+                });
+                box.toBottom = data.y == -1;
+                box.toRight = data.x == -1;
+
+                var w = intval(wndInner[1]  * data.w);
+                setStyle(box.resizeableH, 'height', intval(wndInner[0]  * data.h));
+                setStyle(box.resizeableW, 'width', w);
+                pgpFastChat.fixResized(tab, w);
+                break;
+
+            case 'clist_toggled':
+                if (data.val) {
+                    box.show(0, true);
+                } else {
+                    box.hide(0, true);
+                }
+                toggle(curPgpFastChat.el.topLink, !data.val);
+                break;
+
+            case 'clist_moved':
+                setStyle(box.wrap, {
+                    bottom: data.y == -1 ? 0 : 'auto',
+                    top: data.y != -1 ? intval(wndInner[0]  * data.y) : 'auto',
+                    right: data.x == -1 ? 0 : 'auto',
+                    left: data.x != -1 ? intval(wndInner[1] * data.x) : 'auto'
+                });
+                box.toBottom = data.y == -1;
+                box.toRight = data.x == -1;
+                break;
+
+            case 'onlines_toggled':
+                pgpFastChat.clistToggleOnlines(data.val);
+                pgpFastChat.clistRender();
+        }
+    },
+
+    onUnidle: function () {
+        if (!curNotifier.version || !curPgpFastChat.clistBox) {
+            return;
+        }
+        if (curPgpFastChat.clistBox.visible &&
+            (curPgpFastChat.el.clist.scrollTop < 100 || curRBox.active != curPgpFastChat.clistBox.id)) {
+            pgpFastChat.clistRender(); // Title is also updated here
+        } else {
+            pgpFastChat.clistUpdateTitle();
+        }
+        each (curPgpFastChat.tabs, function (peer) {
+            pgpFastChat.restoreDraft(peer);
+        });
+    },
+    clistUpdate: function () {
+        var ts = vkNow();
+        if (!curNotifier.is_server || (curPgpFastChat.clistUpdatedTs && ts - curPgpFastChat.clistUpdatedTs < 60000)) {
+            return;
+        }
+        curPgpFastChat.clistUpdatedTs = ts;
+        var tabs = [], mid;
+        for (mid in curPgpFastChat.tabs) {
+            tabs.push(mid);
+        }
+        for (mid in Chat.tabs) {
+            tabs.push(mid);
+        }
+        ajax.post('al_im.php', {act: 'a_onlines', peer: tabs.join(',')}, {
+            onDone: function (onlines) {
+                pgpFastChat.clistGotOnlines(onlines);
+                pgpFastChat.lcSend('clistOnlines', onlines);
+            }
+        });
+    },
+    clistGotOnlines: function (onlines) {
+        var prev = curPgpFastChat.onlines, offlines = [];
+        curPgpFastChat.onlines = onlines;
+        if (curNotifier.idle_manager && curNotifier.idle_manager.is_idle || (!curPgpFastChat.tabs && Chat.tabs)) {
+            return;
+        }
+        each (curPgpFastChat.tabs, function (peer) {
+            if (curPgpFastChat.onlines[peer] != prev[peer]) {
+                pgpFastChat.tabNotify(peer, onlines[peer] ? 'online' : 'offline', onlines[peer]);
+                if (!onlines[peer]) offlines[peer] = 1;
+            }
+        });
+        each(Chat.tabs, function(peer) {
+            if (curPgpFastChat.onlines[peer] != prev[peer]) {
+                if (onlines[peer]) {
+                    addClass(ge('chat_tab_icon_'+peer), 'chat_tab_online');
+                } else {
+                    removeClass(ge('chat_tab_icon_'+peer), 'chat_tab_online');
+                }
+            }
+        })
+        offlines = arrayKeyDiff(prev, onlines, offlines);
+        each(offlines, function (peer) {
+            pgpFastChat.tabNotify(peer, 'offline');
+        });
+        pgpFastChat.clistRender();
+    },
+
+    clistShow: function () {
+        var animatePointer = hasClass(Chat.wrap, 'chat_active');
+        pgpFastChat.clistRender();
+        if (!curPgpFastChat.clistBox.visible) {
+            if (curPgpFastChat.activeBox && curPgpFastChat.activeBox != curPgpFastChat.clistBox) {
+                curPgpFastChat.activeBox.hide();
+            }
+            curPgpFastChat.clistBox.show();
+            pgpFastChat.setActive(curPgpFastChat.clistBox);
+            curPgpFastChat.clistBoxScroll && curPgpFastChat.clistBoxScroll.update(false, true);
+            curPgpFastChat.el.topLink && hide(curPgpFastChat.el.topLink);
+        } else {
+            curPgpFastChat.clistBox.focus();
+        }
+        elfocus('fc_clist_filter');
+        //pgpFastChat.stateChange({op: 'clist_toggled', val: 1});
+        pgpFastChat.movePointer(false, animatePointer);
+    },
+    clistHide: function () {
+        curPgpFastChat.clistBox.hide();
+        if (curPgpFastChat.activeBox == curPgpFastChat.clistBox) {
+            pgpFastChat.setActive(false);
+        }
+    },
+
+    clistRender: function (more) {
+        var html = [], offsetReached = !more,
+            limit = 1 + (more ? 40 : 20),
+            q = curPgpFastChat.q,
+            queries,
+            filterList = false,
+            lastMid = false,
+            re = false,
+            offline = false;
+
+        if (q) {
+            re = [];
+            each(pgpFastChat.clistCache(q), function () {
+                re.push(escapeRE(this));
+            });
+            re = new RegExp("([ \-]|^|\s|&nbsp;|\b)(" + re.join('|') + ")", "gi"); // no lookbhind in JS
+            filterList = curPgpFastChat.clistCache[q] || {};
+        } else if (curPgpFastChat.clOnlines) {
+            filterList = curPgpFastChat.onlines;
+        }
+        curPgpFastChat.clHasMore = false;
+        each (curPgpFastChat.friends, function (k) {
+            var mid = intval(k), matches = !filterList || filterList[mid],
+                unread = curPgpFastChat.tabs[mid] ? curPgpFastChat.tabs[mid].unread : 0;
+
+            if (!offsetReached) {
+                if (mid == curPgpFastChat.clOffset) {
+                    offsetReached = true;
+                }
+                return;
+            }
+            if (!matches) {
+                return;
+            }
+            if (!(--limit)) {
+                curPgpFastChat.clHasMore = true;
+                return false
+            }
+            html.push(pgpFastChat.clistWrapPeer(mid, this, re));
+            lastMid = mid;
+        });
+        if (lastMid === false && !more && !q) { // Nobody is online
+            html.push('<div class="fc_clist_empty">' + getLang(q ? 'mail_im_clist_notfound' : 'mail_im_clist_empty') + '</div>');
+        } else if (q && !curPgpFastChat.clHasMore) {
+            html.push(pgpFastChat.getCorrespondents(q, re, lastMid === false));
+        }
+        curPgpFastChat.clOffset = lastMid;
+        if (more) {
+            var div = ce('div', {innerHTML: html.join('')}), frag = document.createDocumentFragment();
+            while (div.firstChild) {
+                frag.appendChild(div.firstChild);
+            }
+            curPgpFastChat.el.clist.appendChild(frag);
+            if (!curPgpFastChat.clHasMore) {
+                pgpFastChat.clistUpdateTitle(true);
+            }
+        } else {
+            val(curPgpFastChat.el.clist, html.join(''));
+            pgpFastChat.clistUpdateTitle(true);
+            if (browser.chrome || browser.safari) { // Webkit bug fix
+                setTimeout(function () {
+                    setStyle(curPgpFastChat.el.clist.firstChild, {width: curPgpFastChat.el.clist.firstChild.clientWidth});
+                    setTimeout(function () {
+                        setStyle(curPgpFastChat.el.clist.firstChild, {width: ''});
+                    }, 0);
+                }, 0);
+            }
+        }
+        if (curPgpFastChat.clSel) {
+            var el = ge('fc_contact' + curPgpFastChat.clSel);
+            if (el) {
+                pgpFastChat.clistPeerOver(el, 1);
+            } else {
+                curPgpFastChat.clSel = false;
+            }
+        } else {
+            var el = geByClass1('fc_contact', curPgpFastChat.el.clist)
+            pgpFastChat.clistPeerOver(el, 1);
+        }
+        if (curPgpFastChat.clistBoxScroll) {
+            curPgpFastChat.clistBoxScroll.update();
+        }
+    },
+    clistWrapPeer: function (id, data, re) {
+        var unread = curPgpFastChat.tabs[id] ? curPgpFastChat.tabs[id].unread : 0,
+            online = curPgpFastChat.onlines[id],
+            href, photoEvents, cls = online ? (online > 0 && online < 6 ? ' fc_contact_mobile' : ' fc_contact_online') : '';
+        var name = (data[0] || '').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#039;');
+        if (re) {
+            name = name.replace(re, '$1<em class="fc_clist_hl">$2</em>');
+        }
+        if (id > 0 && id < 2e9) {
+            href = '/id' + id;
+            photoEvents = 'onmousemove="pgpFastChat.clistPeerOver(this.parentNode, 2);"  onmouseout="pgpFastChat.clistPeerOver(this.parentNode, 1);" onclick="event.cancelBubble = true; return nav.go(this.parentNode, event);"';
+        } else {
+            href = '/im?sel=' + id;
+            photoEvents = '';
+        }
+        if (id > 2e9 && data[3]) {
+            var photoStr = data[3]
+        } else {
+            var photoStr = '<img src="' + Notifier.fixPhoto(data[1]) + '" class="fc_contact_photo"/>';
+        }
+        return '<a href="' + href + '" class="fc_contact clear_fix' + cls + '" id="fc_contact' + id + '" onclick="return pgpFastChat.selectPeer(' + id + ', event);" onmousedown="event.cancelBubble = true;" onmouseover="pgpFastChat.clistPeerOver(this, 1, event);"  onmouseout="pgpFastChat.clistPeerOver(this, 0, event);"><span class="fc_contact_photo fl_l" ' + photoEvents + '>'+photoStr+'</span><span class="fc_contact_name fl_l">' + name + '<span id="fc_contact_unread' + id + '" class="fc_contact_unread">' + (unread ?' <b>+' + unread + '</b>' : '') + '</span></span><span class="fc_contact_status fl_l"></span></a>';
+    },
+    clistPeerOver: function (el, state, e) {
+        if (!el || !checkOver(e, el)) return;
+        var id = el.id.substr(10);
+        if (curPgpFastChat.clSel && state && curPgpFastChat.clSel != id) {
+            pgpFastChat.clistPeerOver(ge('fc_contact' + curPgpFastChat.clSel), 0);
+        }
+        toggleClass(el, 'fc_contact_over', state);
+        toggleClass(el, 'fc_contact_profile', state == 2 && id < 2e9 && id > 0);
+        if (state) {
+            curPgpFastChat.clSel = id;
+        } else if (curPgpFastChat.clSel == id) {
+            curPgpFastChat.clSel = false;
+        }
+    },
+
+    authorOver: function(obj, ev) {
+        var text = obj.getAttribute('title');
+        if (text) {
+            showTooltip(obj, {
+                text: text,
+                black: 1,
+                center: 1,
+                shift: [1, 8, 0]
+            });
+        }
+    },
+
+    getCorrespondents: function(q, re, empty) {
+        clearTimeout(curPgpFastChat.correspondentsTO);
+        if (curPgpFastChat.correspondents && curPgpFastChat.correspondents[q] !== undefined) {
+            return pgpFastChat.wrapCorrespondents(curPgpFastChat.correspondents[q]) || (empty && '<div class="fc_clist_empty">' + getLang('mail_im_clist_notfound') + '</div>') || '';
+        }
+        curPgpFastChat.correspondentsTO = setTimeout(pgpFastChat.loadCorrespondents.pbind(q, re), 100);
+        return '<div id="fc_correspondents"></div>';
+    },
+    loadCorrespondents: function (q, re) {
+        if (q != curPgpFastChat.q) {return;}
+        ajax.post('hints.php', {act: 'a_json_friends', str: q, from: 'fc', allow_multi: 1}, {
+            onDone: function (peers) {
+                if (!curPgpFastChat.correspondents) curPgpFastChat.correspondents = {};
+                var correspondents = {}, k;
+                each (peers, function () {
+                    k = this[3] + '_';
+                    if (curPgpFastChat.friends[k]) return;
+                    correspondents[k] = [this[1], this[2], this[3], this[4] || ''];
+                });
+                curPgpFastChat.correspondents[q] = correspondents;
+                if (q != curPgpFastChat.q) {return;}
+
+                var el = ge('fc_correspondents');
+                if (!el) {return;}
+                var wrap = el.parentNode,
+                    div = ce('div', {innerHTML: pgpFastChat.wrapCorrespondents(correspondents, re)}),
+                    frag = document.createDocumentFragment();
+                if (div.firstChild) {
+                    while (div.firstChild) {
+                        frag.appendChild(div.firstChild);
+                    }
+                } else if (wrap.firstChild == el) {
+                    frag.appendChild(ce('div', {className: 'fc_clist_empty', innerHTML: getLang('mail_im_clist_notfound')}));
+                }
+                wrap.replaceChild(frag, el);
+                pgpFastChat.clistUpdateTitle(true);
+                if (curPgpFastChat.clistBoxScroll) {
+                    curPgpFastChat.clistBoxScroll.update();
+                }
+            }
+        })
+    },
+    wrapCorrespondents: function (correspondents, re) {
+        var html = [], mid;
+        each(correspondents, function (id) {
+            html.push(pgpFastChat.clistWrapPeer(intval(id), this, re));
+        });
+        return html.join('');
+    },
+
+    parseLatKeys: function (text) {
+        var outtext = text, i;
+        lat = "qwertyuiop[]asdfghjkl;'zxcvbnm,./`",
+            rus = "йцукенгшщзхъфывапролджэячсмитьбю.ё";
+        for (i = 0; i < lat.length; i++) {
+            outtext = outtext.split(lat.charAt(i)).join(rus.charAt(i));
+        }
+        return (outtext == text) ? false : outtext;
+    },
+    parseCyr: function (text) {
+        var outtext = text, i,
+            lat1 = ['yo','zh','kh','ts','ch','sch','shch','sh','eh','yu','ya','YO','ZH','KH','TS','CH','SCH','SHCH','SH','EH','YU','YA',"'"],
+            rus1 = ['ё', 'ж', 'х', 'ц', 'ч', 'щ',  'щ',   'ш', 'э', 'ю', 'я', 'Ё', 'Ж', 'Х', 'Ц', 'Ч', 'Щ',  'Щ',   'Ш', 'Э', 'Ю', 'Я', 'ь'],
+            lat2 = 'abvgdezijklmnoprstufhcyABVGDEZIJKLMNOPRSTUFHCYёЁ',
+            rus2 = 'абвгдезийклмнопрстуфхцыАБВГДЕЗИЙКЛМНОПРСТУФХЦЫеЕ';
+        for (i = 0; i < rus1.length; i++) {
+            outtext = outtext.split(rus1[i]).join(lat1[i]);
+        }
+        for (i = 0; i < rus2.length; i++) {
+            outtext = outtext.split(rus2.charAt(i)).join(lat2.charAt(i));
+        }
+        return (outtext == text) ? false : outtext;
+    },
+
+    updateFriends: function(onlineCount) {
+        if (!window.Chat || !Chat.inited) return;
+        var el = Chat.onl;
+        if (!el) return;
+        if (onlineCount > 0) {
+            val(el, onlineCount);
+            show(Chat.wrap);
+        } else {
+            hide(Chat.wrap);
+        }
+    },
+
+    onDocClick: function(e) {
+        if (!curPgpFastChat.activeBox) {
+            return;
+        }
+        var el = e.target;
+        if (curBox()) {
+            return false;
+        }
+        while(el) {
+            if (el.className == 'fc_tab_wrap' || el.id == 'chat_onl_wrap' || el.id == 'custom_menu_cont' || el.id == 'layer_wrap' || el.id == 'box_layer_wrap') {
+                return true;
+            }
+            el = el.parentNode;
+        }
+        var tab = curPgpFastChat.tabs[curPgpFastChat.activeBox.options.peer];
+        if (tab) {
+            if (trim(Emoji.editableVal(tab.txt)) || (tab.imMedia && tab.imMedia.getMedias().length)) {
+                return true;
+            }
+        }
+        curPgpFastChat.activeBox.hide();
+    },
+
+    clistCache: function(q) {
+        if (q) {
+            var queries = [q], query, t, i, j, cached, name, re, fr, cache;
+            if (t = parseLatin(q)) {
+                queries.push(t);
+            }
+            if (t = pgpFastChat.parseLatKeys(q)) {
+                queries.push(t);
+            }
+            if (t = pgpFastChat.parseCyr(q)) {
+                queries.push(t);
+            }
+            if (curPgpFastChat.clistCache[q] !== undefined) {
+                return queries;
+            }
+            cache = curPgpFastChat.clistCache[q] = {};
+            for (i in queries) {
+                query = queries[i];
+                if (cached = curPgpFastChat.clistCache[' ' + query.charAt(0).toLowerCase()]) {
+                    re = new RegExp('(^|\\s|\\()' + escapeRE(query), 'gi');
+                    for (j in cached) {
+                        fr = curPgpFastChat.friends[j + '_'];
+                        if (!isArray(fr)) {
+                            continue;
+                        }
+                        if (fr[0].match(re) !== null) {
+                            cache[j] = 1;
+                        }
+                    }
+                }
+            }
+            j = 0;
+            for (i in cache) {
+                j++;
+            }
+            cache._num = j;
+            return queries;
+        }
+
+        var name, cursor, letter;
+        curPgpFastChat.clistCache = {};
+        for (i in curPgpFastChat.friends) {
+            name = curPgpFastChat.friends[i][0];
+            i = intval(i);
+            cursor = 0;
+            while (1) {
+                letter = ' ' + name.charAt(cursor).toLowerCase();
+                if (!curPgpFastChat.clistCache[letter]) {
+                    curPgpFastChat.clistCache[letter] = {};
+                }
+                curPgpFastChat.clistCache[letter][i] = 1;
+                cursor = name.indexOf(' ', cursor + 1);
+                if (cursor == -1) break;
+                ++cursor;
+            }
+        }
+    },
+
+    clistShowMore: function () {
+        if (!curPgpFastChat.clHasMore) {
+            return;
+        }
+        var clist = curPgpFastChat.el.clist,
+            st = clist.scrollTop,
+            h = clist.clientHeight,
+            sh = clist.scrollHeight;
+
+        if (st + h * 3 > sh) {
+            pgpFastChat.clistRender(true);
+        }
+    },
+
+    clistUpdateTitle: function (rendered) {
+        var cnt = 0, cnt1 = 0, i;
+        for (i in curPgpFastChat.friends) {
+            if (curPgpFastChat.onlines[intval(i)]) {
+                cnt1++;
+                cnt++
+            } else if (!curPgpFastChat.clOnlines) {
+                cnt++;
+            }
+        }
+        newVal = (cnt1 ? getLang('mail_im_X_onlines_title', cnt1) : getLang('mail_im_onlines_title')).toString();
+
+        pgpFastChat.updateFriends(cnt1);
+
+        val(curPgpFastChat.el.clistTitle, newVal);
+        val(curPgpFastChat.el.topLink, newVal.toLowerCase());
+
+        if (curPgpFastChat.clistBoxScroll) {
+            if (!curPgpFastChat.clHasMore && rendered) {
+                cnt = curPgpFastChat.el.clist.childNodes.length;
+            } else if (curPgpFastChat.q) {
+                cnt = intval((curPgpFastChat.clistCache[curPgpFastChat.q] || {})._num);
+            }
+            curPgpFastChat.clistBoxScroll.options.contHeight = cnt * 46 + (cnt > 0 ? 8 : 0);
+        }
+    },
+
+    clistToggleOnlines: function (online) {
+        if (online === undefined) {
+            online = !curPgpFastChat.clOnlines;
+            pgpFastChat.stateChange({op: 'onlines_toggled', val: online ? 1 : 0});
+        }
+        toggleClass(curPgpFastChat.el.clistOnline, 'fc_clist_online_active', online);
+        curPgpFastChat.clOnlines = online;
+    },
+
+    clistFilterKey: function (e) {
+        var el;
+        switch (e.keyCode) {
+            case KEY.DOWN:
+            case KEY.UP:
+                if (e.type != 'keyup') {
+                    if (el = curPgpFastChat.clSel && ge('fc_contact' + curPgpFastChat.clSel)) {
+                        var nextKey = e.keyCode == KEY.DOWN ? 'nextSibling' : 'previousSibling', nextEl = el;
+                        do {
+                            nextEl = nextEl[nextKey];
+                        } while (nextEl && (nextEl.nodeType != 1 || !hasClass(nextEl, 'fc_contact')));
+                    } else if (!curPgpFastChat.clSel && e.keyCode == KEY.DOWN) {
+                        nextEl = geByClass1('fc_contact', curPgpFastChat.el.clist, 'a');
+                    }
+                    if (nextEl && nextEl != el) {
+                        pgpFastChat.clistPeerOver(nextEl, 1);
+                        var lCont = curPgpFastChat.el.clist;
+                        if (nextEl.offsetTop + 16 > lCont.clientHeight + lCont.scrollTop) {
+                            lCont.scrollTop = nextEl.offsetTop + 16 - lCont.clientHeight;
+                            curPgpFastChat.clistBoxScroll.update()
+                        } else if (nextEl.offsetTop - 36 < lCont.scrollTop) {
+                            lCont.scrollTop = nextEl.offsetTop - 36;
+                            curPgpFastChat.clistBoxScroll.update()
+                        }
+                    }
+                }
+                break;
+
+            case KEY.LEFT:
+            case KEY.RIGHT:
+                return true;
+
+            case KEY.ENTER:
+                if (e.type != 'keyup' && (el = curPgpFastChat.clSel && ge('fc_contact' + curPgpFastChat.clSel))) {
+                    if (e.ctrlKey || e.metaKey && browser.mac) {
+                        nav.go(el.href.match(/\b(vkontakte\.ru|vk\.com)(\/[^\/]+?)$/)[2]);
+                    } else {
+                        pgpFastChat.selectPeer(curPgpFastChat.clSel);
+                    }
+                    // fall through
+                } else {
+                    break;
+                }
+
+            case KEY.ESC:
+                if (e.type != 'keyup') {
+                    var filter = ge('fc_clist_filter'), prevVal = val(filter) || curPgpFastChat.clSel;
+                    filter.blur();
+                    val(filter, curPgpFastChat.q = '');
+                    curPgpFastChat.clSel = false;
+                    if (prevVal) {
+                        pgpFastChat.clistRender();
+                    }
+                }
+                break;
+
+            default: return;
+        }
+        return cancelEvent(e);
+    },
+
+    changePeerCounter: function(peer, add, setVal) {
+        if (!Chat.tabs[peer]) {
+            return false;
+        }
+        var iconObj = ge('chat_tab_icon_'+peer);
+        var counter = geByClass1('chat_tab_counter', iconObj)
+        if (!counter) {
+            counter = ce('dev', {className: 'chat_tab_counter'});
+            iconObj.insertBefore(counter, iconObj.firstChild);
+        }
+        if (setVal === undefined) {
+            Chat.counters[peer] = positive((Chat.counters[peer] || 0) + add);
+        } else {
+            Chat.counters[peer] = setVal;
+        }
+        if (Chat.counters[peer]) {
+            counter.innerHTML = Chat.counters[peer];
+        } else {
+            re(counter);
+        }
+    },
+
+    prepareTabIcon: function(peer, opts, noAnim) {
+        var mem = curPgpFastChat.friends && curPgpFastChat.friends[peer+'_'];
+        if (!mem) {
+            var need = 3;
+            curPgpFastChat.needPeers[peer] = [need, false, setTimeout(pgpFastChat.getPeers, irand(150, 200)), opts];
+            pgpFastChat.lcSend('needPeer', {id: peer, mask: need});
+        } else {
+            var data = {name: mem[0], photo: mem[1], online: curPgpFastChat.onlines[peer]};
+            pgpFastChat.addTabIcon(peer, data, noAnim);
+        }
+    },
+
+    addTabIcon: function(peer, data, noAnim) {
+        if (Chat.tabs[peer]) {
+            return;
+        }
+        if (peer > 2e9) {
+            var imgRow = data.data.members_grid_fc || '';
+        } else {
+            var imgRow = '<img class="chat_tab_img" src="'+data.photo+'" width="38" height="38"/>';
+        }
+        if (peer > 2e9) {
+            var peerHref = 'im?sel=c'+(peer - 2e9);
+        } else {
+            var peerHref = '/id'+peer;
+        }
+        var t = se('<a class="chat_tab_wrap'+(noAnim ? '' : ' chat_tab_beforeanim')+(data.online ? ' chat_tab_online' : '')+'" id="chat_tab_icon_'+peer+'" href="'+peerHref+'" onclick="pgpFastChat.itemsOut();return pgpFastChat.selectPeer('+peer+', event);"><div class="chat_tab_imgcont"><div class="chats_sp chat_tab_online_icon"></div><div class="chat_tab_typing_wrap"><div class="chats_sp chat_tab_typing_icon"></div></div><div class="chat_tab_close" onclick="return pgpFastChat.closeTabIcon('+peer+', event)"></div>'+imgRow+'</div></a>');
+        Chat.itemsCont.insertBefore(t, Chat.itemsCont.firstChild);
+        Chat.tabs[peer] = {el: t, name: data['name']};
+        addClass(Chat.wrap, 'chat_expand');
+        if (!noAnim) {
+            animate(t, {height: 50, opacity: 1}, {duration: 100});
+        }
+        pgpFastChat.checkChatHeight();
+        Chat.scrollNode.scrollTop = 0;
+    },
+
+    checkChatHeight: function() {
+        var height = getSize(Chat.itemsCont)[1];
+        Chat.lastHeight = height;
+
+        if (height > Chat.maxHeight) {
+            if (!Chat.fixH) {
+                Chat.fixH = true;
+                addClass(Chat.scrollNode, 'chat_fix_height');
+                setStyle(Chat.scrollNode, {height: Chat.maxHeight});
+                addEvent(Chat.scrollNode, 'mousewheel', pgpFastChat.scrollWrap);
+                addEvent(Chat.scrollNode, 'DOMMouseScroll', pgpFastChat.scrollWrap);
+                pgpFastChat.checkShadow();
+            }
+            Chat.scrollNode.scrollTop = height - Chat.maxHeight;
+        } else if (Chat.fixH) {
+            Chat.fixH = false;
+            removeClass(Chat.scrollNode, 'chat_fix_height');
+            setStyle(Chat.scrollNode, {height: 'auto'});
+            removeEvent(Chat.scrollNode, 'mousewheel', pgpFastChat.scrollWrap);
+            removeEvent(Chat.scrollNode, 'DOMMouseScroll', pgpFastChat.scrollWrap);
+            pgpFastChat.checkShadow();
+        }
+
+    },
+
+    checkShadow: function() {
+        var sc = intval(Chat.scrollNode.scrollTop);
+        if (sc && Chat.fixH) {
+            if (!Chat.shadowTop) {
+                addClass(Chat.wrap, 'chat_scroll_top');
+                fadeIn(geByClass1('chat_cont_sh_top', Chat.wrap), 200);
+                Chat.shadowTop = true;
+            }
+        } else {
+            if (Chat.shadowTop) {
+                fadeOut(geByClass1('chat_cont_sh_top', Chat.wrap), 200);
+                Chat.shadowTop = false;
+            }
+        }
+
+        if ((Chat.lastHeight - sc > Chat.maxHeight - 48) && Chat.fixH) {
+            if (!Chat.shadowBottom) {
+                fadeIn(geByClass1('chat_cont_sh_bottom', Chat.wrap), 200);
+                Chat.shadowBottom = true;
+            }
+        } else {
+            if (Chat.shadowBottom) {
+                fadeOut(geByClass1('chat_cont_sh_bottom', Chat.wrap), 200);
+                Chat.shadowBottom = false;
+            }
+        }
+    },
+
+    scrollWrap: function(event) {
+        if (!event) event = window.event;
+        var delta = 0;
+        if (event.wheelDeltaY || event.wheelDelta) {
+            delta = (event.wheelDeltaY || event.wheelDelta) / 2;
+        } else if (event.detail) {
+            delta = -event.detail * 10
+        }
+        Chat.scrollNode.scrollTop -= delta;
+
+        if (curPgpFastChat.activeBox == curPgpFastChat.clistBox) {
+            curPgpFastChat.pointerMargin = 0;
+            pgpFastChat.setPointer(false, curPgpFastChat.pointerMargin, curPgpFastChat.prevPointer);
+        } else {
+            curPgpFastChat.pointerMargin = -Chat.scrollNode.scrollTop;
+            pgpFastChat.setPointer(true, curPgpFastChat.pointerMargin, curPgpFastChat.prevPointer);
+        }
+
+        pgpFastChat.checkShadow();
+
+        if (Chat.ttPeer) {
+            setStyle(Chat.userNameTT, {top: Chat.ttTop - Chat.scrollNode.scrollTop + pgpFastChat.itemsOffset});
+        }
+
+        return cancelEvent(event)
+    },
+
+    selectPeer: function(peer, event, opts) {
+        if (checkEvent(event)) {
+            return true;
+        }
+        var animatePointer = hasClass(Chat.wrap, 'chat_active');
+        var mem = curPgpFastChat.friends && curPgpFastChat.friends[peer+'_'], need = 0;
+        if (curPgpFastChat.tabs && curPgpFastChat.tabs[peer]) {
+            var box = curPgpFastChat.tabs[peer].box;
+            if (box.minimized) {
+                box.unminimize(true);
+            }
+            pgpFastChat.activateTab(peer);
+            pgpFastChat.movePointer(peer, animatePointer);
+        } else {
+            if (!opts) {
+                opts = {};
+            }
+            opts.fixed = true;
+            opts.onPeerAdded = function() {
+                pgpFastChat.movePointer(peer, animatePointer);
+            }
+            pgpFastChat.addPeer(peer, false, true, opts);
+        }
+        pgpFastChat.readLastMsgs(peer);
+        return false;
+    },
+
+    closeTabIcon: function(peer, ev, nohide) {
+        if (curPgpFastChat.activeBox && curPgpFastChat.activeBox.options.peer == peer && !nohide) {
+            curPgpFastChat.activeBox.hide();
+            pgpFastChat.setActive(false);
+        }
+        var tabEl = ge('chat_tab_icon_'+peer);
+        addClass(tabEl, 'chat_tab_hiding');
+        delete Chat.tabs[peer];
+        if (curPgpFastChat.tabs[peer] && curPgpFastChat.tabs[peer].box.options.fixed) {
+            delete curPgpFastChat.tabs[peer];
+        }
+        var onAmin = function() {
+            re(tabEl);
+            if (tabEl) {
+                tabEl = false;
+                if (curPgpFastChat.activeBox) {
+                    pgpFastChat.movePointer(curPgpFastChat.activeBox.options.peer, true);
+                }
+            }
+            pgpFastChat.checkChatHeight();
+        };
+        animate(tabEl, {height: 0, opacity: 0}, {duration: 100, onComplete: onAmin});
+        if (!nohide) {
+            pgpFastChat.stateChange({op: 'closed', peer: peer});
+        }
+        var cnt = 0;
+        for(var i in Chat.tabs) {
+            cnt += 1;
+        }
+        if (!cnt) {
+            removeClass(Chat.wrap, 'chat_expand');
+        }
+        pgpFastChat.itemsOut();
+        return cancelEvent(ev);
+    },
+
+    getPointerShift: function(isPeer, pm, tabDiff) {
+        var bottomPointer = tabDiff - pm;
+
+        var mh = Chat.maxHeight + 32;
+        if (isPeer && bottomPointer < 56) {
+            return bottomPointer - 56;
+        } else if (isPeer && bottomPointer > mh) {
+            return bottomPointer - mh;
+        }
+        return 0;
+    },
+
+    setPointer: function(isPeer, pm, tabDiff) {
+        if (!curPgpFastChat.activeBox) {
+            return false;
+        }
+
+        var shift = pgpFastChat.getPointerShift(isPeer, pm, tabDiff);
+        var pointer = geByClass1('fc_tab_pointer', curPgpFastChat.activeBox.wrap);
+        setStyle(pointer, {marginTop: pm + shift});
+        return shift;
+    },
+
+    movePointer: function(peer, aminate) {
+        if (!curPgpFastChat.activeBox) {
+            return false;
+        }
+        var pOffset = geByClass1('fc_pointer_offset', curPgpFastChat.activeBox.wrap);
+        if (peer) {
+            var selTab = ge('chat_tab_icon_'+peer);
+            if (!selTab) {
+                return false;
+            }
+            if (!Chat.fixH && selTab.nextSibling) {
+                var topDiff = getXY(selTab.nextSibling)[1] - 50;
+            } else if (selTab.nextSibling || Chat.fixH) {
+                var topDiff = getXY(selTab)[1];
+            } else {
+                var topDiff = getXY(ge('chat_tab_wrap'))[1] - 50;
+            }
+            var tabDiff = 23 + getXY(Chat.cont)[1] - topDiff;
+            var pm = -Chat.scrollNode.scrollTop;
+        } else {
+            var tabDiff = 28;
+            var pm = 0;
+        }
+        var shift = pgpFastChat.setPointer(peer, pm, tabDiff);
+
+        if (aminate) {
+            if (curPgpFastChat.prevPointer) {
+                var shiftPos = curPgpFastChat.prevPointer - pm + shift;
+                var tdiff = pgpFastChat.getPointerShift(true, pm + shift, curPgpFastChat.prevPointer);
+                setStyle(pOffset, {bottom: curPgpFastChat.prevPointer - tdiff + shift});
+            }
+            animate(pOffset, {bottom: tabDiff}, {duration: 100});
+        } else {
+            setStyle(pOffset, {bottom: tabDiff});
+        }
+        curPgpFastChat.prevPointer = tabDiff;
+    },
+
+    setActive: function(box) {
+        curPgpFastChat.activeBox = box;
+        if (box) {
+            pgpFastChat.moveBoxesLeft(box.pos[1]);
+        }
+    },
+
+    moveBoxesLeft: function(x, rec) {
+        var x  = x - 8;
+
+        var mostRight = false;
+        var mostRightX = 0;
+        for (var i in curPgpFastChat.tabs) {
+            t = curPgpFastChat.tabs[i];
+            if (!rec) {
+                t.box.movedLeft = false;
+            }
+            if (!t || t.box.options.fixed || !t.box.toBottom || t.box.movedLeft || t.box.noMove) {
+                continue;
+            }
+            var pos = t.box.pos;
+            if (pos[1] + pos[3] >= x) {
+                if (pos[1] > mostRightX) {
+                    mostRight = t;
+                    mostRightX = pos[1];
+                }
+            }
+        }
+        if (mostRight) {
+            var newX = x - mostRight.box.pos[3];
+            var newY = mostRight.box.pos[0];
+            if (newX < 0) {
+                newX = 0;
+            }
+            mostRight.box.movedLeft = true;
+            animate(mostRight.box.wrap, {left: newX}, 200);
+            mostRight.box.pos = [newY, newX, mostRight.box.pos[2], mostRight.box.pos[3]];
+            var wndInner = getWndInner();
+            pgpFastChat.stateChange({op: 'moved', peer: mostRight.box.options.peer, y: newY / wndInner[0], x: newX / wndInner[1]});
+            if (newX) {
+                pgpFastChat.moveBoxesLeft(newX, true);
+            }
+        } else {
+            pgpFastChat.moveLeftY = 0;
+        }
+    },
+
+    moveBoxAway: function(box, minLeft) {
+        var x = minLeft - box.pos[3] - 20;
+        var w = box.pos[3];
+        var y = box.pos[0];
+        var h = box.pos[2];
+        var pass = false;
+        while(x > 0 && !pass) {
+            pass = true;
+            for (var i in curPgpFastChat.tabs) {
+                var p = curPgpFastChat.tabs[i].box.pos;
+                if ((p[0]+(p[2] / 2) > y) && (p[1]+p[3] > x && p[1] < x + w)) {
+                    x -= p[3]
+                    pass = false;
+                }
+            }
+        }
+        if (x < 0) {
+            x = positive(Math.random() * minLeft);
+        }
+        animate(box.wrap, {left: x}, 300);
+        var wndInner = getWndInner();
+        pgpFastChat.stateChange({op: 'moved', peer: box.options.peer, y: y / wndInner[0], x: x / wndInner[1]});
+    },
+
+    pinTab: function(peer, ev, fast) {
+        if (peer == -1) {
+            var t = curPgpFastChat.clistBox;
+        } else {
+            var t = curPgpFastChat.tabs[peer].box;
+        }
+        t.options.fixed = false;
+        removeClass(t.wrap, 'fc_fixed');
+        //pgpFastChat.closeTabIcon(peer, ev, true);
+        pgpFastChat.hideChatCtrl();
+        pgpFastChat.setActive(false);
+
+        var newT = t.wrap.offsetTop;// - 8;
+        var newL = t.wrap.offsetLeft - 10;
+        setStyle(t.wrap, {left: t.wrap.offsetLeft, top: t.wrap.offsetTop, right: 'auto', bottom: 'auto'});
+        if (!fast) {
+            animate(t.wrap, {left: newL, top: newT}, 300);
+        }
+        t.pos = [newT, newL, t.pos[2], t.pos[3]];
+
+        t.toRight = false;
+        t.toBottom = true;
+        addClass(t.wrap, 'fc_tobottom');
+
+        var startW = t.resizeableW.clientWidth - intval(getStyle(t.resizeableW, 'paddingRight')) - intval(getStyle(t.resizeableW, 'paddingLeft'));
+        var startH = t.resizeableH.clientHeight - intval(getStyle(t.resizeableH, 'paddingBottom')) - intval(getStyle(t.resizeableH, 'paddingTop'));
+
+        var wndInner = getWndInner();
+        if (peer == -1) {
+            pgpFastChat.stateChange({op: 'clist_toggled', val: 1, y: t.toBottom ? -1 : t.pos[0] / wndInner[0], x: t.toRight ? -1 : t.pos[1] / wndInner[1]});
+        } else {
+            pgpFastChat.stateChange({op: 'unfixed', peer: peer, y: t.toBottom ? -1 : t.pos[0] / wndInner[0], x: t.toRight ? -1 : t.pos[1] / wndInner[1], h: startH / wndInner[0], w: startW / wndInner[1]});
+        }
+        t.noMove = true;
+        pgpFastChat.moveBoxesLeft(newL);
+        t.noMove = false;
+    },
+
+    addPeer: function (peer, events, force, opts) {
+        if (!opts) {
+            opts = {};
+        }
+        var mem = curPgpFastChat.friends && curPgpFastChat.friends[peer+'_'], need = 0;
+        if (force) {
+            pgpFastChat.stateChange({op: 'added', peer: peer, fixed: opts.fixed});
+        } else if (curNotifier.idle_manager && !curNotifier.idle_manager.is_idle && events) {
+            force = true;
+        }
+        if (mem) {
+            var data = {name: mem[0], photo: mem[1], fname: mem[2], hash: mem[3], online: curPgpFastChat.onlines[peer], sex: mem[4]};
+            //if (opts.fixed) {
+            pgpFastChat.addTabIcon(peer, data, opts.noAnim)
+            //}
+            pgpFastChat.addBox(peer, data, opts);
+            if (events) {
+                curPgpFastChat.tabs[peer].auto = 1;
+                pgpFastChat.imFeed(peer, events);
+            } else {
+                if (!opts || !opts.nofocus) {
+                    pgpFastChat.activateTab(peer);
+                }
+                if (!curPgpFastChat.onlines[peer]) {
+                    pgpFastChat.tabNotify(peer, 'unavail');
+                }
+                need |= 2;
+            }
+        } else {
+            need = 3;
+        }
+        if (need) {
+            if (force) {
+                curPgpFastChat.needPeers[peer] = [need, events, false, opts];
+                pgpFastChat.getPeers();
+            } else {
+                curPgpFastChat.needPeers[peer] = [need, events, setTimeout(pgpFastChat.getPeers, irand(150, 200)), opts];
+                pgpFastChat.lcSend('needPeer', {id: peer, mask: need});
+            }
+        }
+    },
+    getPeers: function () {
+        var q = [], peers = {};
+        each (curPgpFastChat.needPeers, function (peer) {
+            q.push(peer);
+            q.push(this[0]);
+            clearTimeout(this[2]);
+            peers[peer] = this[0];
+        });
+        if (!q.length) {
+            return;
+        }
+        pgpFastChat.lcSend('fetchingPeers', peers);
+        ajax.post('al_im.php', {act: 'a_get_fc_peers', peers: q.join(',')}, {
+            onDone: function (data) {
+                pgpFastChat.gotPeers(data);
+                pgpFastChat.lcSend('gotPeers', data);
+            }
+        });
+    },
+    gotPeers: function (data) {
+        each (curPgpFastChat.needPeers, function (peer) {
+            if (data[peer]) {
+                var events = this[1], opts = this[3];
+                if (!(this[0] & 2) || data[peer].history !== undefined) {
+                    clearTimeout(this[2]);
+                    delete curPgpFastChat.needPeers[peer];
+                }
+                if (!curPgpFastChat.tabs[peer]) {
+                    if (opts.fixedLoad) {
+                        pgpFastChat.addTabIcon(peer, data[peer]);
+                    } else {
+                        pgpFastChat.addTabIcon(peer, data[peer]);
+                        pgpFastChat.addBox(peer, data[peer], opts);
+                        if (events) {
+                            curPgpFastChat.tabs[peer].auto = 1;
+                            pgpFastChat.imFeed(peer, events);
+                        } else {
+                            if (this[0] & 2) {
+                                pgpFastChat.gotHistory(peer, data[peer].history);
+                            }
+                            if (!opts || !opts.nofocus) {
+                                pgpFastChat.activateTab(peer);
+                            }
+                        }
+                    }
+                    //}
+                } else {
+                    pgpFastChat.gotHistory(peer, data[peer].history);
+                }
+            }
+        });
+    },
+    gotHistory: function (peer, hist) {
+        if (!isArray(hist) || !hist.length || !hist[0]) {
+            return;
+        }
+        var tab = curPgpFastChat.tabs[peer], log = hist[0], msgs = hist[1];
+        tab.offset = hist[2];
+        extend(tab.msgs, msgs);
+        each(msgs, function (k, v) {
+            if (!v[0] && v[1]) {
+                tab.unread++;
+            }
+        });
+        val(tab.log, log);
+        // pgpFastChat.readLastMsgs(peer);
+        tab.logWrap.scrollTop = tab.logWrap.scrollHeight;
+        setTimeout(function () {
+            tab.logWrap.scrollTop = tab.logWrap.scrollHeight;
+            tab.scroll && tab.scroll.update(false, true);
+        }, 10);
+    },
+    decHashCb: function(hash) {
+        (function(_){curPgpFastChat.decodedHashes[_]=(function(__){var ___=ge?'':'___';for(____=0;____<__.length;++____)___+=__.charAt(__.length-____-1);return geByClass?___:'___';})(_.substr(_.length-5)+_.substr(4,_.length-12));})(hash);
+    },
+    decodehash: function(hash) {
+        if (!curPgpFastChat.decodedHashes)
+            curPgpFastChat.decodedHashes = {};
+        if (!curPgpFastChat.decodedHashes[hash]) {
+            pgpFastChat.decHashCb(hash);
+        }
+        return curPgpFastChat.decodedHashes[hash];
+    },
+    onMyTyping: function (peer) {
+        peer = intval(peer);
+        var tab = curPgpFastChat.tabs[peer];
+        if (peer <= 0 || !tab) return;
+        var ts = vkNow();
+        if (curPgpFastChat.myTypingEvents[peer] && ts - curPgpFastChat.myTypingEvents[peer] < 5000) {
+            return;
+        }
+        curPgpFastChat.myTypingEvents[peer] = ts;
+        ajax.post('al_im.php', {act: 'a_typing', peer: peer, hash: tab.sendhash, from: 'fc'});
+    },
+    updateTypings: function () {
+        each(curPgpFastChat.tabs || {}, function (peer, v) {
+            pgpFastChat.updateTyping(peer);
+        });
+    },
+    updateTyping: function (peer, force) {
+        var tab = curPgpFastChat.tabs[peer],
+            typings = [],
+            lastEv = curPgpFastChat.typingEvents[peer],
+            sex,
+            ts = vkNow(),
+            el = ge('fc_tab_typing' + peer);
+
+        if (peer < 2e9) {
+            if (lastEv && ts - lastEv < 6000) {
+                typings.push(tab.fname || tab.name || '');
+                sex = tab.sex;
+            }
+        } else {
+            var mems = tab.data.members;
+            each (lastEv || {}, function (k, v) {
+                if (v && ts - v < 6000 && mems[k] && mems[k].first_name) {
+                    typings.push(mems[k].first_name || '');
+                    sex = mems[k].sex;
+                }
+            });
+        }
+        if (!typings.length) {
+            return force ? setStyle(el, 'opacity', 0) : fadeTo(el, 1000, 0);
+        }
+        if (typings.length == 1) {
+            val(el, langSex(sex, lang.mail_im_typing).replace('{user}', typings[0]));
+        } else {
+            var lastUser = typings.pop();
+            val(el, getLang('mail_im_multi_typing').replace('{users}', typings.join(', ')).replace('{last_user}', lastUser));
+        }
+        return force ? setStyle(el, 'opacity', 1) : fadeTo(el, 200, 1);
+    },
+    readLastMsgs: function (peer) {
+        var t = this, tab = curPgpFastChat.tabs[peer];
+        if (!peer || !tab) return;
+
+        if (!tab.markingRead && tab.unread) {
+            var unread = [];
+            for (var i in tab.msgs) {
+                if (!tab.msgs[i][0] && tab.msgs[i][1]) {
+                    unread.push(i);
+                }
+            }
+            pgpFastChat.markRead(peer, unread);
+        }
+        pgpFastChat.changePeerCounter(peer, 0, 0);
+    },
+    markRead: function(peer, unread) {
+        if (!unread.length) return;
+        var t = this, tab = curPgpFastChat.tabs[peer];
+        tab.markingRead = true;
+
+        ajax.post('al_im.php', {act: 'a_mark_read', peer: peer, ids: unread, hash: tab.sendhash}, {
+            onDone: function (res, newmsg) {
+                tab.markingRead = false;
+
+                for (var i in unread) {
+                    var msgId = unread[i], row = ge('fc_msg' + msgId), parent = row && row.parentNode;
+                    if (!row) continue;
+                    if (tab.msgs[msgId] && tab.msgs[msgId][1]) {
+                        tab.msgs[msgId][1] = 0;
+                        if (!tab.msgs[msgId][0]) {
+                            tab.unread--;
+                        }
+                    }
+                    removeClass(row, 'fc_msg_unread');
+                    if (hasClass(parent.parentNode, 'fc_msgs_unread')) {
+                        each (parent.childNodes, function () {
+                            if (!hasClass(this, 'fc_msg_unread')) {
+                                removeClass(parent.parentNode, 'fc_msgs_unread');
+                                return false;
+                            }
+                        });
+                    }
+                }
+                if (tab.unread > 0) {
+                    tab.unread = 0;
+                    each (tab.msgs, function () {
+                        if (!this[0] && this[1]) tab.unread++;
+                    });
+                }
+                pgpFastChat.updateUnreadTab(peer);
+            },
+            onFail: function () {
+                tab.markingRead = false;
+            }
+        });
+    },
+    mkMsg: function (msg) {
+        var message = clean(msg).replace(/\n/g, '<br>'),
+            susp = false;
+
+        message = message.replace(/([a-zA-Z\-_\.0-9]+@[a-zA-Z\-_0-9]+\.[a-zA-Z\-_\.0-9]+[a-zA-Z\-_0-9]+)/g, function(url) {
+            return '<a href="/write?email='+url+'" target="_blank">'+url+'</a>'
+        });
+
+        message = message.replace(/(^|[^A-Za-z0-9А-Яа-яёЁ\-\_])(https?:\/\/)?((?:[A-Za-z\$0-9А-Яа-яёЁ](?:[A-Za-z\$0-9\-\_А-Яа-яёЁ]*[A-Za-z\$0-9А-Яа-яёЁ])?\.){1,5}[A-Za-z\$рфуконлайнстРФУКОНЛАЙНСТ\-\d]{2,22}(?::\d{2,5})?)((?:\/(?:(?:\&amp;|\&#33;|,[_%]|[A-Za-z0-9А-Яа-яёЁ\-\_#%?+\/\$.~=;:]+|\[[A-Za-z0-9А-Яа-яёЁ\-\_#%?+\/\$.,~=;:]*\]|\([A-Za-z0-9А-Яа-яёЁ\-\_#%?+\/\$.,~=;:]*\))*(?:,[_%]|[A-Za-z0-9А-Яа-яёЁ\-\_#%?+\/\$.~=;:]*[A-Za-z0-9А-Яа-яёЁ\_#%?+\/\$~=]|\[[A-Za-z0-9А-Яа-яёЁ\-\_#%?+\/\$.,~=;:]*\]|\([A-Za-z0-9А-Яа-яёЁ\-\_#%?+\/\$.,~=;:]*\)))?)?)/ig, function () { // copied to notifier.js:3401
+            var matches = Array.prototype.slice.apply(arguments),
+                prefix = matches[1] || '',
+                protocol = matches[2] || 'http://',
+                domain = matches[3] || '',
+                url = domain + (matches[4] || ''),
+                full = (matches[2] || '') + matches[3] + matches[4];
+
+            if (domain.indexOf('.') == -1 || domain.indexOf('..') != -1) return matches[0];
+            var topDomain = domain.split('.').pop();
+            if (topDomain.length > 6 || indexOf('info,name,aero,arpa,coop,museum,mobi,travel,xxx,asia,biz,com,net,org,gov,mil,edu,int,tel,ac,ad,ae,af,ag,ai,al,am,an,ao,aq,ar,as,at,au,aw,ax,az,ba,bb,bd,be,bf,bg,bh,bi,bj,bm,bn,bo,br,bs,bt,bv,bw,by,bz,ca,cc,cd,cf,cg,ch,ci,ck,cl,cm,cn,co,cr,cu,cv,cx,cy,cz,de,dj,dk,dm,do,dz,ec,ee,eg,eh,er,es,et,eu,fi,fj,fk,fm,fo,fr,ga,gd,ge,gf,gg,gh,gi,gl,gm,gn,gp,gq,gr,gs,gt,gu,gw,gy,hk,hm,hn,hr,ht,hu,id,ie,il,im,in,io,iq,ir,is,it,je,jm,jo,jp,ke,kg,kh,ki,km,kn,kp,kr,kw,ky,kz,la,lb,lc,li,lk,lr,ls,lt,lu,lv,ly,ma,mc,md,me,mg,mh,mk,ml,mm,mn,mo,mp,mq,mr,ms,mt,mu,mv,mw,mx,my,mz,na,nc,ne,nf,ng,ni,nl,no,np,nr,nu,nz,om,pa,pe,pf,pg,ph,pk,pl,pm,pn,pr,ps,pt,pw,py,qa,re,ro,ru,rs,rw,sa,sb,sc,sd,se,sg,sh,si,sj,sk,sl,sm,sn,so,sr,ss,st,su,sv,sx,sy,sz,tc,td,tf,tg,th,tj,tk,tl,tm,tn,to,tp,tr,tt,tv,tw,tz,ua,ug,uk,um,us,uy,uz,va,vc,ve,vg,vi,vn,vu,wf,ws,ye,yt,yu,za,zm,zw,рф,укр,сайт,онлайн,срб,cat,pro,local'.split(','), topDomain) == -1) return matches[0];
+
+            if (matches[0].indexOf('@') != -1) {
+                return matches[0];
+            }
+            try {
+                full = decodeURIComponent(full);
+            } catch (e){}
+
+            if (full.length > 55) {
+                full = full.substr(0, 53) + '..';
+            }
+            full = clean(full).replace(/&amp;/g, '&');
+
+            if (!susp && domain.match(/^([a-zA-Z0-9\.\_\-]+\.)?(vkontakte\.ru|vk\.com|vkadre\.ru|vshtate\.ru|userapi\.com|vk\.me)$/)) {
+                url = replaceEntities(url).replace(/([^a-zA-Z0-9#%;_\-.\/?&=\[\]])/g, encodeURIComponent);
+                var tryUrl = url, hashPos = url.indexOf('#/'), mtch, oncl = '';
+                if (hashPos >= 0) {
+                    tryUrl = url.substr(hashPos + 1);
+                } else {
+                    hashPos = url.indexOf('#!');
+                    if (hashPos >= 0) {
+                        tryUrl = '/' + url.substr(hashPos + 2).replace(/^\//, '');
+                    }
+                }
+                mtch = tryUrl.match(/^(?:https?:\/\/)?(?:vk\.com|vkontakte\.ru)?\/([a-zA-Z0-9\._]+)\??$/);
+                if (mtch) {
+                    if (mtch[1].length < 32) {
+                        oncl = ' mention_id="' + mtch[1] + '" onclick="return mentionClick(this, event)" onmouseover="mentionOver(this)"';
+                    }
+                }
+                return prefix + '<a href="'+ (protocol + url).replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;') + '" target="_blank"' + oncl + '>' + full + '</a>';
+            }
+            return prefix + '<a href="away.php?utf=1&to=' + encodeURIComponent(protocol + replaceEntities(url)) + '" target="_blank" onclick="return goAway(\''+ clean(protocol + url) + '\', {}, event);">' + full + '</a>';
+        });
+
+        message = Emoji.emojiToHTML(message, 1);
+
+        return message;
+    },
+    getEditCont: function(emojiId) {
+        //return '<textarea class="fc_tab_txt text"></textarea>';
+        stManager.add(['emoji.js']);
+        return '<div class="emoji_cont">'+Emoji.tplSmile(emojiId, getLang('mail_emoji_hint'), ' fc_emoji')+'<div class="fc_editable" tabindex="0" contenteditable="true"></div></div>';
+    },
+    getVal: function(obj) {
+        //return obj.value;
+        return Emoji ? Emoji.editableVal(obj) : '';
+    },
+
+    onTxtResize: function(peer) {
+        var tab = curPgpFastChat.tabs[peer];
+        var txt = geByClass1('fc_tab_txt', tab.wrap);
+        var h = getSize(txt)[1];
+        if (h > 40) {
+            var hDiff = positive(h - 40);
+            var resH = intval(getSize(tab.box.resizeableH)[1]);
+            if (resH + tab.hDiff - hDiff < 40) {
+                hDiff = resH + tab.hDiff - 40;
+            }
+            setStyle(tab.box.resizeableH, {height: resH + (tab.hDiff || 0) - hDiff});
+            tab.hDiff = hDiff;
+            pgpFastChat.fixResized(tab, tab.wrap.clientWidth, true);
+        } else if (tab.hDiff) {
+            var resH = intval(getSize(tab.box.resizeableH)[1]);
+            setStyle(tab.box.resizeableH, {height: resH + tab.hDiff});
+            tab.hDiff = 0;
+            pgpFastChat.fixResized(tab, tab.wrap.clientWidth, true);
+        }
+    },
+
+    initTab: function (peer, data, wrap) {
+        var txt = geByClass1('fc_editable', wrap);
+        var tab = curPgpFastChat.tabs[peer] = {
+            name: data.name,
+            fname: data.fname,
+            photo: data.photo,
+            link: '/id' + peer,
+            hash: data.hash,
+            sendhash: pgpFastChat.decodehash(data.hash),
+            sex: data.sex || 0,
+            data: data.data || {},
+            online: data.online,
+            msgs: {},
+            msgscount: 0,
+            unread: 0,
+            sent: 0,
+            sentmsgs: [],
+            box: false,
+            wrap: wrap,
+            //txt: geByClass1('fc_tab_txt', wrap, 'textarea'),
+            editable: 1,
+            txt: txt,
+            txtWrap: txt.parentNode.parentNode,
+            logWrap: geByClass1('fc_tab_log', wrap),
+            log: geByClass1('fc_tab_log_msgs', wrap),
+            notify: geByClass1('fc_tab_notify_wrap', wrap),
+            title: geByClass1('fc_tab_title', wrap),
+            btn: geByClass1('fc_tab_button', wrap)
+        }
+
+        var lastTxtH = 30;
+        tab.addMediaBtn = geByClass1('fc_tab_attach', wrap);
+        if (tab.editable) {
+            cur.t = tab;
+
+            tab.emojiId = Emoji.init(tab.txt, {
+                controlsCont: geByClass1('fc_tab_txt_wrap', wrap),
+                ttDiff: -46,
+                topShift: 281,
+                ttShift: 0,
+                rPointer: true,
+                noRce: true,
+                peer: peer,
+                isChat: true,
+                noCtrlSend: true,
+                onSend: pgpFastChat.send.pbind(peer),
+                checkEditable: pgpFastChat.checkEditable,
+                onResize: function() {
+                    pgpFastChat.onTxtResize(peer);
+                },
+                addMediaBtn: tab.addMediaBtn,
+                onShow: function() {
+                    cssAnim(tab.scroll.scrollbar, {opacity: 0}, {duration: 400});
+                    enterWorks = false;
+                },
+                onHide: function() {
+                    cssAnim(tab.scroll.scrollbar, {opacity: 1}, {duration: 400});
+                    setTimeout(function() {
+                        enterWorks = true;
+                    }, 0);
+                },
+                onEsc: function(e) {
+                    tab.box.hide();
+                    return cancelEvent(e);
+                },
+                onStickerSend: function(stNum) {
+                    var msgId = --tab.sent;
+                    pgpFastChat.send(peer, stNum);
+                }
+            });
+        } else {
+            var minH = 15;
+            autosizeSetup(tab.txt, {minHeight: minH, maxHeight: 42});
+            tab.txt.autosize.options.onResize = function (h) {
+                if (tab.box.minimized) {
+                    return;
+                }
+                var txtH = h == 42 ? 42 : minH;
+                if (txtH != h) {
+                    setStyle(tab.txt, 'height', txtH);
+                }
+                if (txtH != lastTxtH) {
+                    setStyle(tab.logWrap, 'height', tab.logWrap.clientHeight - txtH + lastTxtH); // bottom padding
+                    lastTxtH = txtH;
+                    tab.scroll && tab.scroll.update(false, true);
+                }
+            };
+        }
+
+        tab.imPeerMedias = {};
+        tab.imSortedMedias = {};
+        tab.previewEl = geByClass1('fc_tab_preview', wrap);
+        stManager.add(['page.js', 'page.css'], function() {
+            tab.imMedia = initAddMedia(tab.addMediaBtn, tab.previewEl, [['photo', getLang('profile_wall_photo')], ['video', getLang('profile_wall_video')], ['audio', getLang('profile_wall_audio')], ['doc', getLang('profile_wall_doc')], ['map', getLang('profile_wall_map')]], {
+                mail: 1,
+                tooltip: 1,
+                topOffset: 0,
+                forceUp: 1,
+                global: 1
+            });
+            //val(tab.previewEl, '');
+            tab.imMedia.onChange = setTimeout.pbind(function() {
+                pgpFastChat.onTxtResize(peer);
+            }, 0);
+        });
+        return tab;
+    },
+    addBox: function (peer, data, options) {
+        if (curPgpFastChat.tabs[peer] !== undefined) {
+            return;
+        }
+        var editCont = pgpFastChat.getEditCont(Emoji.last);
+        options = options || {};
+        curPgpFastChat.tabs[peer] = {};
+
+        var wrap = se(rs(pgpFastChat.tplBox, {id: peer, name: data.name, myphoto: Notifier.fixPhoto(curPgpFastChat.me.photo, true), classname: data.online ? (data.online > 0 && data.online < 6 ? ' fc_tab_mobile' : ' fc_tab_online') : '', cont: editCont}));
+
+        if (options.fixed && curPgpFastChat.activeBox) {
+            curPgpFastChat.activeBox.hide(0, false, {noState: true});
+        }
+        var tab = pgpFastChat.initTab(peer, data, wrap);
+        wndInner = getWndInner(),
+            opts = {
+                id: 'fc_peer' + peer,
+                peer: peer,
+                movable: geByClass1('fc_tab_head', wrap),
+                closer: geByClass1('fc_tab_close_wrap', wrap, 'a'),
+                //minimizer: true, //geByClass1('fc_tab_min_wrap', wrap),
+                resizeableH: tab.logWrap,
+                startHeight: 250,
+                startWidth: 252,
+                fixed: options.fixed,
+                minH: 150,
+                minW: 252,
+                nofocus: true,
+                onFocus: function (e) {
+                    if (tab.auto) {
+                        pgpFastChat.stateChange({op: 'added', peer: peer});
+                        delete tab.auto;
+                    }
+
+                    pgpFastChat.restoreDraft(peer);
+                    if (tab.editable) {
+                        Emoji.editableFocus(tab.txt, false, true);
+                    } else {
+                        elfocus(tab.txt);
+                    }
+                    if (tab.wrap.clientWidth) setStyle(tab.title, {maxWidth: tab.wrap.clientWidth - 71});
+                    if (!tab.editable) {
+                        setStyle(tab.txt.autosize.helper, {width: getStyle(tab.txt, 'width', false)});
+                    }
+                    tab.scroll && tab.scroll.update(false, true);
+                    setTimeout(elfocus.pbind(tab.txt), 10);
+                },
+                onClose: function (pos) {
+                    if (options && options.beforeClose) {
+                        options.beforeClose();
+                    }
+                    var tabs = curPgpFastChat.tabs, posSeq = tabs[peer].posSeq;
+                    delete tabs[peer];
+                    if (!curNotifier.isIdle) {
+                        pgpFastChat.stateChange({op: 'hidden', peer: peer});
+                    }
+                    if (!posSeq) return;
+
+                    var i, seqsTabs = {}, seqs = [], seq, box, prevPos, anim;
+                    each (tabs, function () {
+                        if (this.posSeq > posSeq) {
+                            seqsTabs[this.posSeq] = this;
+                            seqs.push(this.posSeq);
+                        }
+                    });
+                    seqs.unshift(posSeq);
+                    seqs.sort();
+                    anim = (!browser.msie && seqs.length < 10);
+                    for (i = 1; i < seqs.length; i++) {
+                        seq = seqs[i];
+                        box = seqsTabs[seq].box;
+                        prevPos = i > 1 ? seqsTabs[seqs[i - 1]].box.pos : pos;
+                        if (anim) {
+                            animate(box.wrap, {left: prevPos[1]}, 100, function (box) {
+                                box._update_pos();
+                            }.pbind(box));
+                        } else {
+                            setStyle(box.wrap, {left: prevPos[1]});
+                        }
+                    }
+                    if (!anim) {
+                        for (i = 1; i < seqs.length; i++) {
+                            box = seqsTabs[seqs[i]].box;
+                            box._update_pos();
+                        }
+                    }
+                },
+                onMinimize: function (val) {
+                    pgpFastChat.stateChange({op: 'minimized', peer: peer, val: val});
+                    pgpFastChat.fixResized(tab, tab.wrap.clientWidth, true);
+                    if (!val) {
+                        tab.txt.blur();
+                        pgpFastChat.restoreDraft(peer);
+                    }
+                },
+                onResizeEnd: function (h, w) {
+                    var wndInner = getWndInner(), pos = tab.box.pos;
+                    tab.scroll && tab.scroll.show();
+                    pgpFastChat.fixResized(tab, w, true);
+                    pgpFastChat.stateChange({op: 'resized', peer: peer, h: h / wndInner[0], w: w / wndInner[1], y: tab.box.toBottom ? -1 : pos[0] / wndInner[0], x: tab.box.toRight ? -1 : pos[1] / wndInner[1]});
+
+                },
+                onResize: function (h, w) {
+                    pgpFastChat.fixResized(tab, w);
+                    var el = geByClass1('fc_tab_title', tab.box.content);
+                    setStyle(el, {width: w - 78});
+                },
+                onResizeStart: function () {
+                    delete tab.posSeq;
+                    tab.scroll && tab.scroll.hide();
+                    val(tab.notify, '');
+                    clearTimeout(tab.hideNotifyTO);
+                },
+                onDragEnd: function (y, x) {
+                    delete tab.posSeq;
+                    pgpFastChat.stateChange({op: 'moved', peer: peer, y: y, x: x});
+                }
+            };
+
+        if (options) {
+            extend(opts, options);
+        }
+
+        if (opts.startLeft === undefined && opts.startRight === undefined) {
+            var xs = [], minTop = wndInner[0] - 350, pos = curPgpFastChat.clistBox.pos;
+            var snapRight = false;
+            if (window.Call && (Call.box || Call.invitation)) {
+                var size = Call.calcBoxPos();
+                xs.push([size.x, size.x + size.w]);
+                snapRight = true;
+            }
+            if (pos[0] + pos[2] > minTop && (curPgpFastChat.clistBox.visible || !snapRight)) {
+                xs.push([pos[1], pos[1] + pos[3]]);
+            }
+            each (curPgpFastChat.tabs, function (k) {
+                if (!(pos = this.box && this.box.pos) || k == peer) {
+                    return;
+                }
+                if (pos[0] + pos[2] > minTop) {
+                    xs.push([pos[1], pos[1] + pos[3]]);
+                }
+            });
+            // var startX = 15, endX = wndInner[1] - 260 - sbWidth(),
+            // var w = ge('page_layout').offsetWidth, startX = (lastWindowWidth + w) / 2 - 240, endX = 0,
+            var startX = lastWindowWidth - 262 - sbWidth(), endX = 0,
+                minLayersX = false, minLayersCnt = false, curX, curCnt, j, sign = endX > startX ? 1 : -1;
+
+            for (curX = startX; sign * curX < sign * endX; curX += sign * 135) {
+                curCnt = 0;
+                for (j = 0; j < xs.length; j++) {
+                    if (curX > xs[j][0] - 260 && curX < xs[j][1]) {
+                        curCnt++;
+                    }
+                    if (curX > xs[j][0] - 10 && curX < xs[j][0] + 10) {
+                        curCnt += 1.1;
+                    }
+                }
+                if (minLayersX === false || curCnt < minLayersCnt) {
+                    minLayersX = curX;
+                    minLayersCnt = curCnt;
+                }
+            }
+
+            if (snapRight && minLayersCnt) {
+                minLayersX = startX;
+            }
+
+            extend(opts, {
+                startBottom: 0,
+                startLeft: minLayersX
+            });
+        }
+        var emp = true, i;
+        for (i in (options || {})) {
+            if (i != 'nofocus') {
+                emp = false;
+                break;
+            }
+        }
+        if (emp) {
+            tab.posSeq = ++curPgpFastChat.posSeq;
+        }
+        /*if (!opts.minimized && !opts.fixed && options !== undefined && nav.objLoc[0] == 'im' &&
+         nav.objLoc.sel == pgpFastChat.nicePeer(peer)
+         ) {
+         opts.minimized = true;
+         cur.hiddenChats[peer] = 1;
+         }*/
+
+        // fixed
+        if (opts.fixed) {
+            //var clistSize = getSize(curPgpFastChat.clistBox.content);
+            opts.startHeight = curPgpFastChat.clistH - 1;
+            opts.startWidth = curPgpFastChat.clistW;
+            opts.onHide =  pgpFastChat.hideChatCtrl;
+            opts.onShow =  pgpFastChat.showChatCtrl;
+        }
+        tab.box = new RBox(wrap, opts);
+        if (opts.fixed) {
+            pgpFastChat.setActive(tab.box);
+        }
+
+        tab.scroll = new Scrollbar(tab.logWrap, {
+            prefix: 'fc_',
+            nomargin: true,
+            nokeys: true,
+            global: true,
+            right: vk.rtl ? 'auto' : 1,
+            left: !vk.rtl ? 'auto' : 1,
+            onScroll: pgpFastChat.onScroll.pbind(tab)
+        });
+
+        if (!opts.minimized && options &&
+            (options.startLeft !== undefined ||
+            options.startTop !== undefined ||
+            options.startWidth !== undefined ||
+            options.startHeight !== undefined)) {
+            tab.box._wnd_resize(wndInner[0], wndInner[1], true);
+        }
+        var enterWorks = true;
+
+        if (tab.wrap.clientWidth) setStyle(tab.title, {maxWidth: tab.wrap.clientWidth - 71});
+        addEvent(tab.txt, 'keydown focus mousedown keyup', function (e) {
+            if (e.type == 'mousedown') {
+                if (curRBox.active == tab.box.id) {
+                    (e.originalEvent || e).cancelBubble = true;
+                }
+                return;
+            }
+            if (e.type == 'keydown' && e.ctrlKey && e.keyCode == KEY.RETURN) {
+                var val = this.value;
+                if (typeof this.selectionStart == "number" && typeof this.selectionEnd == "number") {
+                    var start = this.selectionStart;
+                    this.value = val.slice(0, start) + "\n" + val.slice(this.selectionEnd);
+                    this.selectionStart = this.selectionEnd = start + 1;
+                } else if (document.selection && document.selection.createRange) {
+                    this.focus(e);
+                    var range = document.selection.createRange();
+                    range.text = "\r\n";
+                    range.collapse(false);
+                    if (browser.opera) {
+                        range.moveEnd('character', 0);
+                        range.moveStart('character', 0);
+                    }
+                    range.select();
+                }
+                if (tab.editable) {
+                    pgpFastChat.checkEditable(tab.emojiId, tab.txt);
+                } else {
+                    tab.txt.autosize.update();
+                    setTimeout(function () {
+                        tab.txt.autosize.update();
+                    }, 0);
+                }
+                return false;
+            }
+            if (e.type == 'focus') {
+                curPgpFastChat.peer = peer;
+            } else if (e.type == 'keyup') {
+                var lastVal = tab.lastVal || '',
+                    curVal = pgpFastChat.getVal(this);
+                if (curVal.length != lastVal.length ||
+                    curVal != lastVal) {
+                    if (curVal) {
+                        pgpFastChat.onMyTyping(peer);
+                    }
+                    tab.lastVal = curVal;
+                }
+                clearTimeout(tab.saveDraftTO);
+                tab.saveDraftTO = setTimeout(pgpFastChat.saveDraft.pbind(peer), curVal.length ? 300 : 0);
+                pgpFastChat.checkEditable(tab.emojiId, tab.txt);
+            }
+            pgpFastChat.readLastMsgs(peer);
+        });
+        pgpFastChat.restoreDraft(peer);
+        if (opts.onPeerAdded) {
+            opts.onPeerAdded();
+        }
+    },
+
+    onScroll: function(tab) {
+        var sc = tab.scroll.obj.scrollTop
+        var moreCont = geByClass1('fc_msgs_more', tab.logWrap);
+        if (sc < 200 && isVisible(moreCont)) {
+            moreCont.click();
+        }
+    },
+
+    loadMore: function(peer, obj) {
+        var tab = curPgpFastChat.tabs[peer];
+        offset = tab.offset;
+        if (tab.moreLoading) {
+            return false;
+        }
+        var back = obj.innerHTML;
+        tab.moreLoading = true;
+        ajax.post('al_im.php', {act: 'a_history', peer: peer, offset: offset, from: 'fc'}, {
+            onDone: function(hist) {
+                if (!hist[3]) {
+                    hide(obj);
+                }
+                var cont = obj.parentNode;
+                var prevHeight = cont.clientHeight;
+                cont.insertBefore(cf(hist[0]), obj.nextSibling)
+                var heightDiff = cont.clientHeight - prevHeight;
+                if (heightDiff) {
+                    tab.logWrap.scrollTop += heightDiff;
+                }
+                tab.scroll.update();
+                tab.offset = hist[2];
+                tab.moreLoading = false;
+                pgpFastChat.onScroll(tab);
+            },
+            onFail: function() {
+                tab.moreLoading = false;
+            },
+            showProgress: function() {
+                obj.innerHTML = '<div class="progress_inline"></div>';
+                addClass(obj, 'fc_more_loading');
+            },
+            hideProgress: function() {
+                obj.innerHTML = back;
+                removeClass(obj, 'fc_more_loading');
+            }
+        });
+    },
+
+    sendOnResponse: function(response, msgId, tab) {
+        if (response.version && intval(response.version) > curPgpFastChat.version) {
+            pgpFastChat.updateVersion(response.version);
+            return;
+        }
+
+        var row = ge('fc_msg' + msgId), realMsgId = response.msg_id, pos = indexOf(msgId, tab.newmsgs);
+        if (!row) return;
+
+        if (response.media) {
+            var msgOpts = {sticker: intval(response.sticker)};
+            pgpFastChat.lcSend('gotMedia', {msgId: msgId, peer: tab.box.options.peer, text: response.media, msgOpts: msgOpts});
+            pgpFastChat.gotMsgMedia(tab.box.options.peer, msgId, response.media, msgOpts);
+        }
+        ++tab.msgscount;
+        if (pos != -1) {
+            tab.newmsgs.splice(pos, 1);
+        }
+        row.id = 'fc_msg' + realMsgId;
+
+        tab.msgs[realMsgId] = [1, 1];
+    },
+
+    checkEditable: function(optId, obj) {
+        Emoji.checkEditable(optId, obj, {height: 34});
+    },
+
+    fixResized: function (tab, w, stopped) {
+        if (!tab) return;
+        tab.logWrap.scrollTop = tab.logWrap.scrollHeight;
+        if (w > 0) {
+            setStyle(tab.title, {maxWidth: w - 71});
+        }
+        if (stopped) {
+            if (!tab.editable) {
+                setStyle(tab.txt.autosize.helper, {width: getStyle(tab.txt, 'width', false)});
+            }
+            tab.scroll && tab.scroll.update(false, true);
+        }
+    },
+
+    activateTab: function (peer) {
+        var box = curPgpFastChat.tabs[peer].box;
+        if (curPgpFastChat.activeBox && curPgpFastChat.activeBox != box) {
+            curPgpFastChat.activeBox.hide(0, false, {noState: true});
+        }
+        box.show();
+        if (box.options.fixed) {
+            pgpFastChat.setActive(box);
+        }
+    },
+
+    updateUnreadTab: function (peer) {
+        var tab = curPgpFastChat.tabs[peer];
+        if (!tab) return;
+        val(tab.title, tab.name + (tab.unread ? ' <span class="fc_tab_count">(' + tab.unread + ')</span>' : ''));
+        val('fc_contact_unread' + peer, tab.unread ? ' <b>+' + tab.unread + '</b>' : '');
+        pgpFastChat.changePeerCounter(peer, false, tab.unread);
+    },
+    blinkTab: function (peer) {
+        var tab = curPgpFastChat.tabs[peer];
+        if (tab.blinking || curPgpFastChat.peer == peer) return;
+        tab.blinking = true;
+        clearTimeout(tab.blinkingTO);
+        var wrap = tab.box.wrap, className = wrap.className, zIndex = Math.min(700, intval(getStyle(wrap, 'zIndex')));
+        setStyle(wrap, {zIndex: 700});
+        removeClass(wrap, 'rb_inactive');
+        tab.blinkingTO = setTimeout(function () {
+            delete tab.blinking;
+            delete tab.blinkingTO;
+
+            if (getStyle(wrap, 'zIndex') != 700) {
+                return;
+            }
+            setStyle(wrap, {zIndex: zIndex});
+            wrap.className = className;
+        }, 2000);
+    },
+
+    send: function (peer, stickerId) {
+        var t = this, tab = curPgpFastChat.tabs[peer], msg = trim(tab.editable ? Emoji.editableVal(tab.txt) : val(tab.txt));
+        if (stickerId) {
+            var media = [['sticker', stickerId]];
+            msg = '';
+        } else {
+            var media = tab.imMedia ? tab.imMedia.getMedias() : []
+        }
+        if ((!msg && !media.length)/* || tab.sending*/) {
+            if (tab.editable) {
+                Emoji.editableFocus(tab.txt, false, true);
+            } else {
+                elfocus(tab.txt);
+            }
+            return;
+        }
+        var msgId = --tab.sent;
+        var params = {
+            act: 'a_send',
+            to: peer,
+            hash: tab.sendhash,
+            msg: msg,
+            from: 'fc',
+            media: [],
+        };
+        for (var i = 0, l = media.length, v; i < l; ++i) {
+            if (v = media[i]) {
+                params.media.push(v[0] + ':' + v[1]);
+            }
+        }
+        params.media = params.media.join(',');
+        tab.sending = true;
+        Emoji.ttHide(tab.emojiId);
+        ajax.post('al_im.php', params, {
+            onDone: function(response) {
+                clearTimeout(tab.saveDraftTO);
+                pgpFastChat.saveDraft(peer);
+
+                pgpFastChat.sendOnResponse(response, msgId, tab);
+            },
+            onFail: function(error) {
+                pgpFastChat.error(peer, error || getLang('global_unknown_error'));
+
+                elfocus(tab.txt);
+                val(tab.txt, msg);
+                if (tab.editable) {
+                    pgpFastChat.checkEditable(tab.emojiId, tab.txt);
+                } else {
+                    tab.txt.autosize.update();
+                }
+
+                var row = ge('fc_msg' + msgId);
+                if (!row) return;
+                row.appendChild(ce('span', {className: 'fc_msg_error', innerHTML: getLang('global_error')}));
+                pgpFastChat.scroll(peer);
+                return true;
+            },
+            showProgress: function () {
+                tab.sending = true;
+                tab.sendProgressTO = setTimeout(function () {
+                    var row = ge('fc_msg' + msgId);
+                    if (!row) return;
+                    row.insertBefore(ce('span', {className: 'fc_msg_progress progress', id: 'fc_msg_progress' + msgId}), row.firstChild);
+                }, 2000);
+            },
+            hideProgress: function () {
+                tab.sending = false;
+                clearTimeout(tab.sendProgressTO);
+                re('fc_msg_progress' + msgId);
+            }
+        });
+        re('fc_error' + peer);
+        tab.sentmsgs.push(msgId);
+
+        if (!stickerId) {
+            val(tab.txt, '');
+            if (tab.imMedia) {
+                tab.imMedia.unchooseMedia();
+            }
+        }
+
+        var mediaBit = params.media ? 1 : 0;
+        if (stickerId) {
+            mediaBit += 8;
+        }
+        pgpFastChat.addMsg(pgpFastChat.prepareMsgData([peer, msgId, 1 | 2, pgpFastChat.mkMsg(msg), mediaBit]));
+        delete curPgpFastChat.myTypingEvents[peer];
+        if (tab.editable) {
+            pgpFastChat.checkEditable(tab.emojiId, tab.txt);
+        } else {
+            tab.txt.autosize.update(false, true);
+        }
+        elfocus(tab.txt);
+        pgpFastChat.scroll(peer);
+    },
+    saveDraft: function (peer) {
+        var tab = curPgpFastChat.tabs[peer],
+            txt = (tab || {}).txt;
+        if (!txt || !tab) return;
+        var message = Emoji.editableVal(txt);
+        var data = {
+            txt: trim(message) || '',
+            medias: []
+        };
+        if (!data.txt.length) {
+            data = false;
+        }
+        if (data) {
+            ls.set('im_draft' + vk.id + '_' + peer, data);
+        } else {
+            ls.remove('im_draft' + vk.id + '_' + peer);
+        }
+    },
+    restoreDraft: function (peer) {
+        var tab = curPgpFastChat.tabs[peer],
+            txt = tab.txt,
+            draft = ls.get('im_draft' + vk.id + '_' + peer);
+
+        if (!txt || !tab || !draft ||
+            val(txt).length > draft.txt.length) {
+            return false;
+        }
+        draft.txt = clean(draft.txt);
+        if (tab.editable) {
+            txt.innerHTML = Emoji.emojiToHTML(draft.txt, 1);
+        } else {
+            val(txt, draft.txt || '');
+        }
+        pgpFastChat.checkEditable(tab.emojiId, txt);
+        return true;
+    },
+    error: function (peer, msg) {
+        peer = peer || curPgpFastChat.peer;
+        var tab = curPgpFastChat.tabs[peer];
+        re('fc_error' + peer);
+        tab.log.appendChild(ce('div', {id: 'fc_error' + peer, className: 'fc_msgs_error', innerHTML: msg || getLang('global_error')}));
+        pgpFastChat.scroll(peer);
+    },
+    scroll: function(peer) {
+        peer = peer || curPgpFastChat.peer;
+        var tab = curPgpFastChat.tabs[peer];
+        if (!tab) return;
+        tab.logWrap.scrollTop = tab.logWrap.scrollHeight;
+        tab.scroll && tab.scroll.update(false, true);
+    },
+    mkdate: function(raw) {
+        var result = new Date(raw * 1000),
+            now_time = new Date(),
+            pad = function(num) {return ((num + '').length < 2) ? ('0' + num) : num;};
+
+        if (result.getDay() == now_time.getDay()) {
+            //return pad(result.getHours()) + ':' + pad(result.getMinutes()) + ':' + pad(result.getSeconds());
+            return pad(result.getHours()) + ':' + pad(result.getMinutes());
+        }
+        var date_str = pad(result.getDate()) + '.' + pad(result.getMonth()+1);
+        if (result.getFullYear() != now_time.getFullYear()) {
+            date_str += '.' + (result.getFullYear() + '').substr(2);
+        }
+        return date_str;
+    },
+    prepareMsgData: function (arr) {
+        var peer = arr[0], flags = intval(arr[2]), from_id = flags & 2 ? curPgpFastChat.me.id : (peer > 2e9 ? arr[5] : peer), date = intval(vkNow() / 1000), data = {
+            id: arr[1],
+            peer: peer,
+            from_id: from_id,
+            text: arr[3],
+            out: flags & 2 ? true : false,
+            unread: flags & 1 ? true : false,
+            date: date,
+            date_str: pgpFastChat.mkdate(date)
+        }, author, attFlags = arr[4], attText = '';
+
+        if (attFlags) { // Media
+            if (attFlags & 1) {
+                attText += '<div class="fc_msg_attachments_loading"></div>';
+                if (arr[1] > 0) {
+                    setTimeout(pgpFastChat.needMsgMedia.pbind(peer, arr[1]), 5);
+                }
+            }
+            if (attFlags & 6) {
+                attText += rs(curPgpFastChat.tpl.msg_fwd, {msg_id: arr[1], peer_nice: pgpFastChat.nicePeer(peer), label: getLang(attFlags & 2 ? 'mail_im_fwd_msg' : 'mail_im_fwd_msgs')});
+            }
+            if (attFlags & 8) {
+                data.sticker = true;
+            }
+            if (attText) {
+                data.text += '<div class="fc_msg_attachments" id="fc_msg_attachments' + data.id + '">' + attText + '</div>';
+            }
+        }
+        if (flags & 2) {
+            author = curPgpFastChat.me;
+        } else if (peer > 2e9) {
+            author = curPgpFastChat.tabs[peer].data.members[from_id];
+        } else {
+            author = curPgpFastChat.tabs[peer];
+        }
+        extend(data, {
+            from_id: from_id,
+            link: author.link,
+            photo: author.photo,
+            name: author.name,
+            fname: peer > 2e9 ? author.fname || author.first_name : ''
+        });
+        if (arr[5]) {
+            var att = arr[5].split(',');
+        }
+        return data;
+    },
+    needMsgMedia: function (peer, msgId) {
+        if (msgId <= 0) return;
+
+        pgpFastChat.lcSend('needMedia', {msgId: msgId});
+        curPgpFastChat.needMedia[msgId] = [peer, setTimeout(pgpFastChat.loadMsgMedia.pbind(peer, msgId), curNotifier.is_server ? 0 : irand(150, 250))];
+    },
+    loadMsgMedia: function (peer, msgId) {
+        if (msgId <= 0 || curPgpFastChat.gotMedia[msgId] !== undefined && curPgpFastChat.gotMedia[msgId] !== 0) {
+            return;
+        }
+        pgpFastChat.lcSend('fetchingMedia', {msgId: msgId});
+        curPgpFastChat.gotMedia[msgId] = 0;
+
+        ajax.post('al_im.php', {act: 'a_get_media', id: msgId, from: 'fc'}, {
+            onDone: function (text, msgInfo, msgOpts) {
+                pgpFastChat.lcSend('gotMedia', {msgId: msgId, peer: peer, text: text, msgOpts: msgOpts});
+                pgpFastChat.gotMsgMedia(peer, msgId, text, msgOpts);
+            }
+        })
+    },
+    gotMsgMedia: function(peer, msgId, text, msgOpts) {
+        val('fc_msg_attachments' + msgId, text);
+        if (msgOpts && msgOpts.sticker) {
+            var msg = ge('fc_msg'+msgId);
+            var msgCont = msg.parentNode;
+
+            addClass(msgCont, 'fc_sticker_cont');
+            addClass(msgCont.parentNode, 'fc_msg_sticker');
+        }
+
+        pgpFastChat.scroll(peer);
+        curPgpFastChat.gotMedia[msgId] = [peer, text, msgOpts];
+
+        if (curPgpFastChat.needMedia[msgId] === undefined) return;
+        clearTimeout(curPgpFastChat.needMedia[msgId][1]);
+        delete curPgpFastChat.needMedia[msgId];
+    },
+    addMsg: function (data) {
+        var t = this, peer = data.peer, tab = curPgpFastChat.tabs[peer], log = tab.log, last = log.lastChild;
+        if (last && last.className == 'fc_msgs_error') {
+            last = last.previousSibling;
+        }
+
+        if (!last || !hasClass(last, 'fc_msgs_wrap') || last.getAttribute('data-from') != data.from_id || data.date - intval(last.getAttribute('data-date')) >= 300 || data.sticker || hasClass(last, 'fc_msg_sticker')) {
+            re('fc_log_empty' + peer);
+            var classname = (data.out ? 'fc_msgs_out ' : '') + (data.unread ? 'fc_msgs_unread' : '');
+            if (data.sticker) {
+                classname += ' fc_msg_sticker';
+            }
+            var tpl = data.out ? curPgpFastChat.tpl.msgs_out : curPgpFastChat.tpl.msgs;
+            last = se(rs(tpl, {
+                from_id: data.from_id,
+                link: data.link,
+                photo: Notifier.fixPhoto(data.photo),
+                name: data.from_id == curPgpFastChat.me.id ? getLang('mail_im_thats_u') : stripHTML(data.name),
+                classname: classname,
+                date: data.date,
+                date_str: data.date_str,
+                msgs: ''
+            }))
+            log.appendChild(last);
+        } else if (!data.unread) {
+            removeClass(last, 'fc_msgs_unread');
+        }
+        var msgs = geByClass1('fc_msgs', last, 'div');
+        var msgDate = geByClass1('fc_msgs_date', msgs);
+        var msgLast = geByClass1('fc_msg_last', msgs);
+        if (msgLast) {
+            removeClass(msgLast, 'fc_msg_last');
+            removeClass(msgLast, 'fl_l');
+        }
+        var msgRow = se(rs(curPgpFastChat.tpl.msg, {
+            msg_id: data.id,
+            classname: (data.unread ? 'fc_msg_unread' : '') + ' fc_msg_last fl_l',
+            text: data.text
+        }));
+        if (msgs.firstChild.tagName == 'BR') {
+            re(msgs.firstChild);
+        }
+        if (msgDate) {
+            msgs.insertBefore(msgRow, msgDate);
+        } else {
+            msgs.appendChild(msgRow);
+        }
+        if (vk.id != data.from_id) {
+            delete curPgpFastChat.typingEvents[peer];
+            pgpFastChat.updateTyping(peer, 1);
+        }
+        tab.scroll && tab.scroll.update();
+    },
+    showMsgFwd: function (msgId) {
+        return !showBox('al_im.php', {act: 'a_show_forward_box', id: vk.id + '_' + msgId, from: 'mail'}, {stat: ['im.css'], dark: 1});
+    },
+    closeTab: function (peer) {
+        var box = curPgpFastChat.tabs[peer].box;
+        box.close();
+    },
+
+    nicePeer: function(peer) {
+        if (peer > 2e9) {
+            return 'c' + intval(peer - 2e9);
+        } else if (peer < -2e9) {
+            return 'e' + intval(-peer - 2e9);
+        }
+        return peer;
+    },
+
+    // mobile online
+    tip: function(el, p) {
+        if (hasClass(el.parentNode.parentNode, 'fc_tab_mobile') && (!cur._fcpromo || cur._fcpromo < 0) && !cur._fcdrag) {
+            mobileOnlineTip(el, p);
+        }
+    },
+    promo: function(el, ev) {
+        if (hasClass(el.parentNode.parentNode, 'fc_tab_mobile') && cur._fcpromo >= 0) {
+            mobilePromo();
+            return cancelEvent(ev || window.event);
+        }
+    },
+    promost: function(el) {
+        cur._fcpromo = 1;
+        if (el.tt && el.tt.hide) {
+            el.tt.hide();
+        }
+    },
+
+    tplBox: '<div class="fc_tab_wrap"><div class="fc_tab_head clear_fix"><a class="fc_tab_close_wrap fl_r"><div class="chats_sp fc_tab_close"></div></a><a class="fc_tab_max_wrap fl_r" href="/im?sel=%id%" onmousedown="event.cancelBubble = true;" onclick="return nav.go(this, event);"><div class="chats_sp fc_tab_max"></div></a><a class="fc_tab_pin_wrap fl_r" onmousedown="event.cancelBubble = true;" onclick="return pgpFastChat.pinTab(%id%, event);"><div class="chats_sp fc_tab_pin"></div></a><div class="fc_tab_title noselect fl_l">%name%</div><div class="fl_l fc_tab_online_icon" onmouseover="pgpFastChat.tip(this, {mid: %id%})" onmousedown="pgpFastChat.promost(this)" onclick="return pgpFastChat.promo(this, event)"></div></div><div class="fc_tab %classname%"><div class="fc_tab_log_wrap"><div class="fc_tab_notify_wrap"></div><div class="fc_tab_log"><div class="fc_tab_log_msgs"></div><div class="fc_tab_typing" id="fc_tab_typing%id%"></div></div></div><div class="fc_tab_txt_wrap"><a class="fc_tab_attach"><div class="chats_sp fc_tab_attach_icon"></div></a><div class="fc_tab_txt">%cont%<div class="fc_tab_preview"></div></div></div></div><div class="fc_pointer_offset"><div class="chats_sp fc_tab_pointer fc_tab_pointer_peer"></div></div></div>',
+
+    tplTab: '<div class="fc_tab_log_wrap"><div class="fc_tab_notify_wrap"></div><div class="fc_tab_log"><div class="fc_tab_log_msgs"></div><div class="fc_tab_typing" id="fc_tab_typing%id%"></div></div></div><div class="fc_tab_txt_wrap"><div class="fc_tab_txt">%cont%</div></div>'
+
+};

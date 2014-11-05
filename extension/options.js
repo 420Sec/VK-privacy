@@ -10,7 +10,6 @@ function save_options() {
         passphrase: passphrase,
         type: select
     }, function() {
-        // Update status to let user know options were saved.
         var status = document.getElementById('status');
         status.textContent = 'Options saved.';
         setTimeout(function() {
