@@ -1,37 +1,17 @@
-var parse = function(){
-    $(".im_msg_text").each(function(index){
-        text =  pgp.Decrypt($(this).text());
-        if (text){
-            $(this).text(text);
-        }
-    });
-};
-
-var buttonsource = "<div class='button_blue im_send_cont fl_l' ><button id='extcrypt-button'>Crypt</button></div>";
-var cryptotype = "";
+console.log("script start");
 $(document).ready(function(){
-    $("#im_send_wrap").prepend( buttonsource);
-    $("#extcrypt-button").click(function(){
-        chrome.storage.sync.get({
-            publicKey: '',
-            privateKey: '',
-            passphrase: '',
-            type: 'no'
-        }, function(items) {
-            cryptotype = items.type;
-        });
-
-       /* if (cryptotype == "pgp"){
-
-            if (text){
-                $("#im_editable").text(text);
-            } else {
-                alert("Encrypting error!");
-            }
-        }*/
-        if (cryptotype == "ots"){
-            console.log("ots");
+    console.log("document ready");
+    var buttonsource = "<div class='button_blue im_send_cont fl_l' style='width: 50px; margin-top: 6px;'><button id='extcrypt-button' style='width: 50px;' onclick='createPGPwindow();'>PGP</button></div>";
+    $("#im_user_holder").append(buttonsource);
+    console.log("button added");
+    $.get(chrome.extension.getURL('/injected.js'),
+        function(data) {
+            var script = document.createElement("script");
+            script.setAttribute("type", "text/javascript");
+            script.innerHTML = data;
+            document.getElementsByTagName("head")[0].appendChild(script);
+            document.getElementsByTagName("body")[0].setAttribute("onLoad", "injected_main();");
         }
-    });
-    setTimeout(parse, 1000);
+    );
+    console.log("Script injected");
 });
