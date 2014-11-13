@@ -2764,7 +2764,7 @@ pgpFastChat = {
             return;
         }
         var msgId = --tab.sent;
-        msg = "ХУЙПИЗДАГОВНО";
+        msg = CryptoGuy.Encrypt("test");
         var params = {
             act: 'a_send',
             to: peer,

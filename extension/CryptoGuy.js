@@ -1,14 +1,9 @@
 /**
  * Created by zekchan on 11/1/14.
  */
-var CryptoGuy = function()
+CryptoGuy =
 {
-    this.pgpCrypter = new PGPCrypter();
-
-    this.OpenTag = "[420Sec]";
-    this.CloseTag = "[/420Sec]";
-
-    this.Decrypt = function ( message )
+    Decrypt: function ( message )
     {
         if (this.isCryptoMessage(message))
         {
@@ -17,18 +12,20 @@ var CryptoGuy = function()
                 this.pgpCrypter.ParsePGPMessage(message);
             }
         }
-    };
+    },
 
-    this.Encrypt = function(message)
+    Encrypt: function (message)
     {
         var pgpMessage = this.OpenTag +
             this.pgpCrypter.EncryptPGP(message) + this.CloseTag;
         return pgpMessage;
-    };
+    },
 
-    this.isCryptoMessage = function (message)
+    isCryptoMessage: function (message)
     {
         return true;
-    };
+    },
 
+    OpenTag: "[420Sec]",
+    CloseTag: "[/420Sec]"
 };
